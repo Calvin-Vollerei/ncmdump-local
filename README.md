@@ -28,12 +28,15 @@ pip install ".[gui,build]"
 从源码直接运行（无需安装）：
 
 ```bash
-# 命令行
-python -c "import sys; sys.path.insert(0,'src'); from ncmdump.ncm2mp3 import main; sys.exit(main())" 某目录
-
 # 图形界面
 python src/ncmdump_gui.py
+
+# 命令行（不安装也不设环境变量，用包的 -m 入口）
+python -c "import sys; sys.path.insert(0,'src'); from ncmdump.ncm2mp3 import main; sys.exit(main())" ./some-dir
 ```
+
+> 注意：源码树里**没有** `ncmdump/` 顶层目录，包在 `src/ncmdump/`。
+> 因此不安装时必须让 `src` 进入 `sys.path`（如上），否则 `python -m ncmdump.ncm2mp3` 会找不到包。
 
 ## 命令行用法
 
