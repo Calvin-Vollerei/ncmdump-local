@@ -1,33 +1,51 @@
 # 发布到 GitHub 的步骤
 
-仓库已初始化并完成首次提交，**本地已就绪**。以下三步把它推到 GitHub。
+仓库已初始化并完成提交，**本地已就绪**。以下三步把它推到 GitHub。
+
+代码里登记的位置（`src/ncmdump/metadata.py`，也是界面"检查更新"要用的地址）：
+
+```
+仓库  https://github.com/Calvin-Vollerei/ncmdump-local
+发布  https://github.com/Calvin-Vollerei/ncmdump-local/releases
+```
+
+如果实际用户名/仓库名不是这个，**改 `metadata.py` 顶部那两行**即可，
+`REPO_URL` / `RELEASES_URL` / `API_LATEST_RELEASE` 都是由它们推导出来的；
+同时把 `pyproject.toml` 的 `[project.urls]` 一起改掉。
 
 ## 1. 在 GitHub 建一个空仓库
 
-网页上 New repository → 填名字（例如 `ncmdump-local`）→ **不要**勾选 "Add a README / .gitignore / license"
+网页上 New repository → 名字填 `ncmdump-local` → **不要**勾选 "Add a README / .gitignore / license"
 （本仓库已经有）→ Create。
 
 ## 2. 关联远程并推送
 
 ```bash
 cd ncm2mp3
-git remote add origin https://github.com/<你的用户名>/ncmdump-local.git
+git remote add origin https://github.com/Calvin-Vollerei/ncmdump-local.git
 git branch -M main
 git push -u origin main
 ```
 
-## 3. 推送后要改的几处占位符
+## 3. 发第一个 Release（"检查更新"按钮才有东西可查）
 
-`pyproject.toml` 里的 `OWNER` 需要换成你的用户名（否则 PyPI 的 Homepage/Issues 链接是错的）：
+在仓库页面 → Releases → Draft a new release：
 
-```toml
-[project.urls]
-Homepage = "https://github.com/OWNER/ncmdump-local"
-Repository = "https://github.com/OWNER/ncmdump-local"
-Issues = "https://github.com/OWNER/ncmdump-local/issues"
-```
+1. **Tag** 填 `v1.0.0`（必须与 `metadata.py` 里的 `VERSION` 同源；前缀 `v` 可有可无）；
+2. 标题随意，说明里写更新日志；
+3. 附件可上传打包好的 `NCMConverter` 压缩包；
+4. Publish。
 
-README 里如果写了具体用户名也一并替换。
+之后客户端点「检查更新」会请求
+`https://api.github.com/repos/Calvin-Vollerei/ncmdump-local/releases/latest`，
+对比 `tag_name` 与本地 `VERSION`：
+
+* 更新版本 → 显示「有新版本 vX.Y.Z」并给出链接；
+* 相同或更低 → 「已是最新版本」；
+* 仓库不存在 / 没网 / 被限流 → 「检查失败」并给 Releases 页面链接（**不会报错崩溃**）。
+
+> 公开仓库的该接口无需 token，但有速率限制（未认证约 60 次/小时/IP）。
+> 私有仓库需要 token，本项目的检查不支持，请改用「手动查看 Releases」。
 
 ---
 
