@@ -4,7 +4,7 @@
 
 * **核心零第三方依赖** —— 纯 Python 标准库实现 AES、容器解析、FLAC/ID3 标签写入
 * **全程离线** —— 不联网、不上传、不涉及账号
-* **图形界面**用系统原生窗口 + Windows 材质（Acrylic/Mica/Aero）
+* **图形界面**用系统原生窗口 + Windows 材质（Aero）
 
 > **免责声明**：本项目仅做**本地格式转换**，用于转换你自己合法获得的文件。
 > 它不绕过任何账号或付费校验，也不包含任何音频/歌词素材。
@@ -82,8 +82,9 @@ python src/ncmdump_gui.py
 把 `.ncm` 文件或文件夹拖进去 → 选输出目录（**留空则输出到源文件所在目录**）→ 开始转换。
 
 * 使用**系统默认窗口**：标题栏、边框拉伸、Aero Snap、双击最大化、Alt+Space 全部由 Windows 提供
-* 窗口材质通过 [pywinstyles](https://github.com/Akascape/py-window-styles) 驱动，**构建时固定为 Acrylic**
-  （界面上不提供切换，因此没有多余的样式代码）；遮色层很薄，透明度较高
+* 窗口材质通过 [pywinstyles](https://github.com/Akascape/py-window-styles) 驱动，**构建时固定为 Aero**
+  （只有一种材质，界面上不显示材质标签、也没有切换按钮，因此没有多余的样式代码要打包）；
+  遮色层很薄，透明度较高
 * 转换跑在线程池，进度条 / 当前阶段 / 实时速度 / 逐文件日志实时刷新
 * 「停止」只中断后续任务，正在处理的文件会跑完，不会留下半个文件
 
@@ -91,12 +92,12 @@ python src/ncmdump_gui.py
 
 ```bash
 # 运行时看效果
-NCM_GLASS=mica python src/ncmdump_gui.py     # acrylic | mica | aero | solid
+NCM_GLASS=acrylic python src/ncmdump_gui.py   # acrylic | mica | aero | solid
 ```
 
 ```python
 # 或者改一行再构建
-src/ncmdump_gui.py:  DEFAULT_MATERIAL = "acrylic"   →  "mica" / "aero" / "solid"
+src/ncmdump_gui.py:  DEFAULT_MATERIAL = "aero"   →  "acrylic" / "mica" / "solid"
 ```
 
 想更透明/更实，改同文件里的 `GLASS_TINT_ALPHA`（默认 46，越小越透）。
