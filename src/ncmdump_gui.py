@@ -36,6 +36,16 @@ try:
 except Exception:                     # pragma: no cover - dependency is optional
     _pws = None
 
+# The window material is fixed at build time so there is no switching UI and no unused
+# style code to ship. To ship a different material, change DEFAULT_MATERIAL (one line) or
+# set NCM_GLASS at runtime for a look-see: acrylic | mica | aero | solid.
+DEFAULT_MATERIAL = "acrylic"
+WINDOW_MATERIALS = ("acrylic", "mica", "aero", "solid")
+# alpha of the tint painted over the OS material: lower = more transparent
+GLASS_TINT_ALPHA = 46
+MATERIAL_LABELS = {"acrylic": "Acrylic", "mica": "Mica", "aero": "Aero",
+                   "solid": "纯色", "none": "无材质"}
+
 
 def apply_window_style(window, mode: str) -> str:
     """Apply a pywinstyles style to a Qt window. Returns the mode actually used.
@@ -295,16 +305,6 @@ QWidget { color: #eaf0ff; font-family: "Microsoft YaHei UI", "Segoe UI", sans-se
     background: rgba(120, 200, 255, 52); border: none;
     border-radius: 7px; padding: 3px 8px;
 }
-#winbtn {
-    background: rgba(255, 255, 255, 26); border: none; border-radius: 9px;
-    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; color: #e6ecff;
-    font-size: 13px;
-}
-#winbtn:hover { background: rgba(255, 90, 100, 215); color: white; }
-#mini { background: rgba(255, 255, 255, 26); border: none; border-radius: 9px;
-        min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px; color: #e6ecff;
-        font-size: 15px; }
-#mini:hover { background: rgba(255, 255, 255, 62); }
 #drop {
     background: rgba(255, 255, 255, 40);
     border: none;
@@ -539,14 +539,12 @@ class MainWindow(QWidget):
         self.bytes_done = 0
         self.started_at = 0.0
         self._glass_on = True
-        self._glass_mode = "acrylic"
-        # NCM_GLASS is a debugging override only; anything unrecognised falls back to the
-        # default material instead of sticking.
+        # The window material is fixed to Acrylic at build time: no switching UI, no dead
+        # code paths. NCM_GLASS=<acrylic|mica|aero|solid> remains as a debugging escape
+        # hatch so a build can be tested against a different material without editing code.
         override = os.environ.get("NCM_GLASS", "").strip().lower()
-        if override not in ("acrylic", "mica", "aero", "solid"):
-            override = ""
-        self._glass_prefer = override or "acrylic"
-        self._material = self._glass_prefer
+        self._material = override if override in WINDOW_MATERIALS else DEFAULT_MATERIAL
+        self._glass_on = self._material != "solid"
 
         self._build_ui()
         self.timer = QTimer(self)
@@ -601,15 +599,10 @@ class MainWindow(QWidget):
         bar.addWidget(dot)
         bar.addLayout(title_box)
         bar.addStretch(1)
-        self.lbl_glass = QLabel("glass")
+        self.lbl_glass = QLabel("Acrylic")
         self.lbl_glass.setObjectName("glassTag")
-        self.lbl_glass.setToolTip("当前窗口材质（点右侧 ◐ 切换）")
+        self.lbl_glass.setToolTip("窗口材质（构建时固定，不在界面上切换）")
         bar.addWidget(self.lbl_glass)
-        self.btn_glass = QPushButton("◐")
-        self.btn_glass.setObjectName("mini")
-        self.btn_glass.setToolTip("切换窗口材质：Acrylic → Mica → Aero → 纯色")
-        self.btn_glass.clicked.connect(self.toggle_glass)
-        bar.addWidget(self.btn_glass)
         outer.addWidget(self.header)
 
         # ---- drop zone
@@ -741,56 +734,36 @@ class MainWindow(QWidget):
         except Exception:
             pass
 
-        # Native window material through pywinstyles ("acrylic" / "mica" / "aero"),
-        # falling back to the raw DWM backdrop API if the package is missing.
+        # Native window material through pywinstyles (acrylic by default), falling back to
+        # the raw DWM backdrop API if the package is missing.
         self.setStyleSheet(window_stylesheet(self._glass_on))
+        applied = self._material
         if not self._glass_on:
-            self._material = "solid"
             pywinstyles_normal(hwnd)
         else:
-            self._material = apply_window_style(self, self._glass_prefer)
-            if self._material == "none":
-                self._material = apply_glass(hwnd, True)
+            applied = apply_window_style(self, self._material)
+            if applied == "none":
+                applied = apply_glass(hwnd, True)
+        self._material = applied
         # Colour the native frame to match the app, and keep the window border off.
         tune_native_frame(hwnd, glass_on=self._glass_on)
         self.backdrop.set_enabled(self._glass_on)
-        # The OS does the blurring, so keep the tint thin: a heavy fill would hide exactly
-        # the effect we asked the system for.
-        self.backdrop.set_tint(QColor(8, 12, 22, 72 if self._glass_on else 255))
-        self._glass_mode = self._material
+        # The OS does the blurring, so keep the tint very thin: a heavier fill would hide
+        # exactly the effect we asked the system for. Raised transparency on request.
+        self.backdrop.set_tint(QColor(8, 12, 22, GLASS_TINT_ALPHA if self._glass_on else 255))
         self._sync_glass_ui()
-        _boot_log("window: prefer=%r material=%s hwnd=%d native_frame=True"
-                  % (self._glass_prefer, self._material, hwnd))
+        _boot_log("window: material=%s hwnd=%d native_frame=True" % (self._material, hwnd))
 
     def _sync_glass_ui(self):
-        """Reflect the material state in the card styling and the title-bar badge."""
+        """Reflect the material state in the card styling and the header badge."""
         on = self._glass_on
         self.card.setProperty("solid", "false" if on else "true")
         self.card.style().unpolish(self.card)
         self.card.style().polish(self.card)
-        labels = {"acrylic": "Acrylic", "mica": "Mica", "aero": "Aero",
-                  "solid": "纯色", "none": "无材质",
-                  "win11-acrylic": "Acrylic", "win11-mica": "Mica"}
-        text = labels.get(self._material, self._material)
-        self.lbl_glass.setText(text)
+        self.lbl_glass.setText(MATERIAL_LABELS.get(self._material, self._material))
         self.lbl_glass.setToolTip(
-            "当前窗口材质：%s（由 pywinstyles 驱动 Windows 合成）。\n"
-            "点 ◐ 依次切换 Acrylic → Mica → Aero → 纯色。" % text)
-
-    def toggle_glass(self):
-        """Cycle the window material: acrylic -> mica -> aero -> solid."""
-        order = ["acrylic", "mica", "aero", "solid"]
-        try:
-            index = order.index(self._glass_prefer)
-        except ValueError:
-            index = 0
-        self._glass_prefer = order[(index + 1) % len(order)]
-        self._glass_on = self._glass_prefer != "solid"
-        try:
-            self._apply_win_effects()
-        except Exception as exc:
-            _boot_log("toggle glass failed: %s" % exc)
-        self._append_log("窗口材质：%s" % self.lbl_glass.text())
+            "窗口材质：%s，由 pywinstyles 驱动 Windows 合成器。\n"
+            "材质在构建时固定（DEFAULT_MATERIAL），不在界面上切换。" % self.lbl_glass.text())
 
     # ---------------------------------------------------------------- helpers
     def _toggle_organize(self, on: bool):
@@ -1074,13 +1047,13 @@ def main(argv=None) -> int:
             if arg.startswith("--report="):
                 report = arg.split("=", 1)[1]
         window.add_paths([])
-        from ncmdump.ncm_core import _np, xor_keystream
+        from ncmdump.ncm_core import _numpy, xor_keystream
         lines = [
             "frozen          = %s" % getattr(sys, "frozen", False),
             "executable      = %s" % sys.executable,
             "python          = %s" % sys.version.split()[0],
             "PySide6 ok      = True",
-            "numpy available = %s" % (_np is not None),
+            "numpy available = %s" % (_numpy() is not None),
             "keystream ok    = %s" % (xor_keystream(b"\x00\x01\x02\x03", bytes(256)) == b"\x00\x01\x02\x03"),
             "widgets         = %d" % sum(1 for _ in window.findChildren(QWidget)),
             "organize on     = %s" % window.ed_ja.isEnabled(),
@@ -1104,7 +1077,7 @@ def main(argv=None) -> int:
             pass
         return 0
     window.show()
-    trace("shown; glass=%s" % getattr(window, "_glass_mode", "?"))
+    trace("shown; material=%s" % window._material)
     shot = None
     for arg in argv:
         if arg.startswith("--screenshot="):

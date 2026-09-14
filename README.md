@@ -78,10 +78,38 @@ python src/ncmdump_gui.py
 把 `.ncm` 文件或文件夹拖进去 → 选输出目录（**留空则输出到源文件所在目录**）→ 开始转换。
 
 * 使用**系统默认窗口**：标题栏、边框拉伸、Aero Snap、双击最大化、Alt+Space 全部由 Windows 提供
-* 窗口材质通过 [pywinstyles](https://github.com/Akascape/py-window-styles) 驱动；
-  点 `◐` 在 **Acrylic → Mica → Aero → 纯色** 之间切换
+* 窗口材质通过 [pywinstyles](https://github.com/Akascape/py-window-styles) 驱动，**构建时固定为 Acrylic**
+  （界面上不提供切换，因此没有多余的样式代码）；遮色层很薄，透明度较高
 * 转换跑在线程池，进度条 / 当前阶段 / 实时速度 / 逐文件日志实时刷新
 * 「停止」只中断后续任务，正在处理的文件会跑完，不会留下半个文件
+
+想换成别的材质，两种办法（都不需要改界面）：
+
+```bash
+# 运行时看效果
+NCM_GLASS=mica python src/ncmdump_gui.py     # acrylic | mica | aero | solid
+```
+
+```python
+# 或者改一行再构建
+src/ncmdump_gui.py:  DEFAULT_MATERIAL = "acrylic"   →  "mica" / "aero" / "solid"
+```
+
+想更透明/更实，改同文件里的 `GLASS_TINT_ALPHA`（默认 46，越小越透）。
+
+### 启动性能
+
+导入阶段做过一轮优化，实测（Windows / Python 3.11，到窗口构造完成）：
+
+| 项目 | 优化前 | 优化后 |
+| --- | --- | --- |
+| `import ncmdump.ncm_core` | 104 ms | **7 ms** |
+| `import ncmdump.ncm2mp3` | 33 ms | **1 ms** |
+| 到窗口可用总计 | 369 ms | **196 ms** |
+
+做法：numpy 改成**首次使用时才探测**（原来在模块顶层 import，代价 ~100 ms，
+而 CLI 可能一次都不用）；CLI 的线程池 / 多进程 import 移进函数内部
+（GUI 不走 CLI，却要替它付导入成本）。CI 有一条测试守着"导入不得拉起 numpy"。
 
 ### 打包 EXE
 

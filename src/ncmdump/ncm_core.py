@@ -247,10 +247,29 @@ def _size_of(fh) -> int:
         return size
 
 
-try:  # optional, big speed-up for the XOR step
-    import numpy as _np
-except Exception:  # pragma: no cover
-    _np = None
+# numpy is optional and only helps the XOR step, but importing it eagerly costs ~100 ms of
+# startup for a CLI that may never convert anything. So it is resolved on first use.
+_np = None
+_np_probed = False
+
+
+def _numpy():
+    """Return the numpy module if it is importable, else None (probed once)."""
+    global _np, _np_probed
+    if not _np_probed:
+        _np_probed = True
+        try:
+            import numpy as _module
+        except Exception:  # pragma: no cover - the fallback path is the common case
+            _module = None
+        _np = _module
+    return _np
+
+
+def _reset_numpy_probe():
+    """Forget the numpy probe. Used by tests that need to exercise the fallback path."""
+    global _np, _np_probed
+    _np, _np_probed = None, False
 
 
 def xor_keystream(data: bytes, keybox: bytes, phase: int = 0) -> bytes:
@@ -264,14 +283,15 @@ def xor_keystream(data: bytes, keybox: bytes, phase: int = 0) -> bytes:
     if n == 0:
         return data
     offset = phase & 0xFF
-    if _np is not None:
-        arr = _np.frombuffer(data, dtype=_np.uint8)
+    np = _numpy()
+    if np is not None:
+        arr = np.frombuffer(data, dtype=np.uint8)
         if offset:
-            key = _np.frombuffer((keybox[offset:] + keybox[:offset]) * (n // 256 + 1),
-                                 dtype=_np.uint8)[:n]
+            key = np.frombuffer((keybox[offset:] + keybox[:offset]) * (n // 256 + 1),
+                                dtype=np.uint8)[:n]
         else:
-            key = _np.frombuffer(keybox * (n // 256 + 1), dtype=_np.uint8)[:n]
-        return (_np.bitwise_xor(arr, key)).tobytes()
+            key = np.frombuffer(keybox * (n // 256 + 1), dtype=np.uint8)[:n]
+        return (np.bitwise_xor(arr, key)).tobytes()
     if offset:
         stream = (keybox[offset:] + keybox[:offset]) * (n // 256) + \
             (keybox[offset:] + keybox[:offset])[: n % 256]

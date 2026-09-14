@@ -177,9 +177,27 @@ def test_xor_keystream_falls_back_without_numpy(monkeypatch):
     keybox = bytes(range(256))
     data = os.urandom(5000)
     fast = ncm_core.xor_keystream(data, keybox, 7)
+    # pretend the probe ran and found nothing, so the fallback is taken
     monkeypatch.setattr(ncm_core, "_np", None)
+    monkeypatch.setattr(ncm_core, "_np_probed", True)
     slow = ncm_core.xor_keystream(data, keybox, 7)
     assert slow == fast
+
+
+def test_numpy_probe_is_lazy():
+    """Importing the module must not pull numpy in; the probe happens on first XOR."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; sys.path.insert(0, %r);"
+        "import ncmdump.ncm_core as c;"
+        "print('numpy' in sys.modules)" % os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "False", "numpy was imported at module import time"
 
 
 def test_xor_keystream_empty():
