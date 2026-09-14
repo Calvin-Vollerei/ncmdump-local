@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install (core only — no extras)
+        run: python -m pip install --upgrade pip && python -m pip install .
+
+      - name: Install test tools
+        run: python -m pip install pytest
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: AES self-test
+        run: python src/ncmdump/aes_lite.py
+
+  zero-dependency:
+    name: core must run with the standard library only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # `python -S` disables site-packages, so any accidental third-party import fails
+      # loudly instead of being masked by a preinstalled package.
+      # NOTE: do not add -E, it would discard PYTHONPATH and break this check.
+      - name: Import the core with site-packages disabled
+        env:
+          PYTHONPATH: src
+        run: |
+          python -S -c "
+          import sys, importlib.util
+          print('site disabled:', not sys.flags.no_site)
+          assert importlib.util.find_spec('numpy') is None, 'numpy leaked into the stdlib-only environment'
+          import ncmdump, ncmdump.ncm_core, ncmdump.tags, ncmdump.ncm2mp3, ncmdump.aes_lite
+          import ast, pathlib
+          allowed = {
+              'argparse','base64','concurrent','dataclasses','glob','json','os','re','shutil',
+              'ssl','struct','sys','tempfile','time','typing','urllib','__future__','numpy',
+          }
+          for path in sorted(pathlib.Path('src/ncmdump').glob('*.py')):
+              tree = ast.parse(path.read_text(encoding='utf-8'))
+              for node in ast.walk(tree):
+                  roots = []
+                  if isinstance(node, ast.Import):
+                      roots = [a.name.split('.')[0] for a in node.names]
+                  elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                      roots = [node.module.split('.')[0]]
+                  for root in roots:
+                      assert root in allowed, f'{path.name}: unexpected import {root!r}'
+          print('stdlib-only import check: OK')
+          "
+      - name: Convert a synthetic container with site-packages disabled
+        env:
+          PYTHONPATH: src:tests
+        run: |
+          python -S -c "
+          import sys, tempfile, os
+          sys.path.insert(0, 'src'); sys.path.insert(0, 'tests')
+          import ncm_builder as B
+          from ncmdump.ncm_core import decrypt_file, decrypt_to_file
+          audio = B.fake_flac(b'payload' * 100)
+          tmp = tempfile.mkdtemp()
+          src = os.path.join(tmp, 'a.ncm'); B.write(src, audio)
+          assert decrypt_file(src).audio == audio, 'in-memory decrypt mismatch'
+          out = os.path.join(tmp, 'a.flac')
+          decrypt_to_file(src, out)
+          assert open(out,'rb').read() == audio, 'streamed decrypt mismatch'
+          print('stdlib-only end-to-end decrypt: OK')
+          "
+
+  hygiene:
+    name: repository hygiene (no media / secrets / machine paths)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No DRM containers, media or artwork
+        run: |
+          bad=$(git ls-files | grep -Ei '\.(ncm|uc|kwm|qmc[0-9a-z]*|mflac[0-9]*|mgg[0-9]*|kgm[0-9a]*|tm[0-9]|bkc[a-z0-9]*|vpr|flac|mp3|m4a|aac|ogg|wav|ape|dff|wma|lrc|jpg|jpeg|png|webp|gif)$' || true)
+          if [ -n "$bad" ]; then echo "::error::forbidden media/container files are tracked:"; echo "$bad"; exit 1; fi
+          echo "no media files tracked: OK"
+
+      - name: No build artefacts, logs or caches
+        run: |
+          bad=$(git ls-files | grep -Ei '(^|/)(dist|build|__pycache__|\.pytest_cache|\.ruff_cache|ncm-work|wheels)/|\.(pyc|pyo|whl|exe|dll|pyd|log)$' || true)
+          if [ -n "$bad" ]; then echo "::error::build artefacts or logs are tracked:"; echo "$bad"; exit 1; fi
+          echo "no build artefacts tracked: OK"
+
+      - name: No credentials or private keys
+        run: |
+          if git ls-files | grep -Ei '(^|/)\.env|\.(pem|key|p12|pfx)$|id_rsa'; then
+            echo "::error::possible credential files are tracked"; exit 1
+          fi
+          # scan tracked text files for token-ish content
+          if git grep -nEI '(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,})' -- . ; then
+            echo "::error::found what looks like a credential"; exit 1
+          fi
+          echo "no credentials found: OK"
+
+      - name: No machine-specific absolute paths
+        run: |
+          # Windows drive paths and unix home paths must not be baked in
+          if git grep -nEI '([A-Za-z]:\\\\?Users\\\\?[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/)' -- . ':!*.md' ; then
+            echo "::error::a hard-coded machine path was found in source"; exit 1
+          fi
+          echo "no absolute machine paths in source: OK"
+
+      - name: Every python file is valid and lint-clean
+        run: |
+          python -m pip install ruff
+          ruff check src tests
+
+      - name: Repository hygiene guard (same rules as local scripts/check_hygiene.py)
+        run: python scripts/check_hygiene.py

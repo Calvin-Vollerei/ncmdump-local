@@ -1,0 +1,103 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ncmdump-local"
+version = "1.0.0"
+description = "Convert NetEase Cloud Music .ncm files to playable FLAC/MP3 locally — pure-Python CLI, no third-party dependencies"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "ncm2mp3 contributors" }]
+keywords = ["ncm", "netease", "netease-cloud-music", "flac", "mp3", "converter", "decrypt"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Conversion",
+]
+
+# The core is deliberately dependency-free: AES, the container parser and the FLAC/ID3
+# writers are all implemented in the standard library only.
+dependencies = []
+
+[project.optional-dependencies]
+# Accelerates the keystream XOR step (~7 MB/s -> >200 MB/s). Entirely optional: without it
+# ncm_core falls back to a pure-Python big-integer XOR.
+fast = ["numpy>=1.22"]
+
+# Everything the GUI and the EXE build need.
+gui = [
+    "PySide6-Essentials>=6.5",
+    # Optional at runtime: only used for the window material. The GUI degrades to a solid
+    # panel (or the built-in DWM fallback) when it is missing.
+    "pywinstyles>=1.8",
+]
+
+# Packaging helpers for building the standalone EXE.
+build = [
+    "pyinstaller>=6.0",
+]
+
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/OWNER/ncmdump-local"
+Repository = "https://github.com/OWNER/ncmdump-local"
+Issues = "https://github.com/OWNER/ncmdump-local/issues"
+
+[project.scripts]
+ncmdump = "ncmdump.ncm2mp3:main"
+
+[project.gui-scripts]
+ncmdump-gui = "ncmdump_gui:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = ["ncmdump_gui"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+ncmdump = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+# The package declares >=3.9, so do NOT let ruff modernise syntax: UP006/UP007 would
+# rewrite `List[str]` -> `list[str]` and `Optional[X]` -> `X | None`, both of which are
+# runtime errors on 3.9.
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4", "SIM"]
+ignore = [
+    "E501",    # long lines are allowed in the algorithm notes and docstrings
+    "SIM105",  # contextlib.suppress would hurt readability around ctypes calls
+    "SIM115",  # short-lived open() reads are clearer than with-blocks in tests
+]
+
+[tool.ruff.lint.per-file-ignores]
+# the AES tables are generated with deliberately terse loops
+"src/ncmdump/aes_lite.py" = ["E741"]
+# the fixture builder is a compact AES reference implementation
+"tests/ncm_builder.py" = ["E741", "C401"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# let the tests import both the package and the fixture builder without installing
+pythonpath = ["src", "tests"]
