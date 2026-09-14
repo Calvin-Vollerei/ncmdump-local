@@ -329,13 +329,21 @@ def _uslt_frame(lyrics: str) -> bytes:
 
 
 def _write_id3(path: str, tag: TagInfo) -> str:
+    """Write an ID3v2.3 tag in front of an MP3.
+
+    Streams the audio into a sibling temp file and swaps it in, instead of reading the
+    whole file, truncating the original and rewriting it. The old shape could leave a
+    partial file if the process died mid-write, and held roughly 2.3x the file size in
+    RAM; the FLAC path already worked this way.
+    """
+    skip = 0
     with open(path, "rb") as fh:
-        blob = fh.read()
-    if blob[:3] == b"ID3":  # drop an existing tag so re-runs do not stack up
-        size = 0
-        for b in blob[6:10]:
-            size = (size << 7) | (b & 0x7F)
-        blob = blob[10 + size:]
+        head = fh.read(10)
+        if head[:3] == b"ID3":        # drop an existing tag so re-runs do not stack up
+            size = 0
+            for b in head[6:10]:
+                size = (size << 7) | (b & 0x7F)
+            skip = 10 + size
 
     frames = b"".join([
         _text_frame("TIT2", tag.title),
@@ -346,8 +354,25 @@ def _write_id3(path: str, tag: TagInfo) -> str:
         _apic_frame(tag.cover, tag.cover_mime or _sniff_mime(tag.cover)) if tag.cover else b"",
     ])
     header = b"ID3\x03\x00\x00" + _synchsafe(len(frames))
-    with open(path, "wb") as fh:
-        fh.write(header + frames + blob)
+
+    tmp = "%s.id3tmp" % path
+    try:
+        with open(path, "rb") as src, open(tmp, "wb") as dst:
+            dst.write(header)
+            dst.write(frames)
+            src.seek(skip)
+            while True:
+                chunk = src.read(1 << 20)
+                if not chunk:
+                    break
+                dst.write(chunk)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return "tagged"
 
 

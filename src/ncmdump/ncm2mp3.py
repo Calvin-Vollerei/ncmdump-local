@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 
 # `concurrent.futures` pulls in threading and multiprocessing, which costs tens of
@@ -127,6 +128,7 @@ def _convert(src, out_dir, keep, want_cover, want_lyrics, lrc_plain,
     name = os.path.basename(src)
     base = os.path.splitext(name)[0]
     tmp_path = None
+    claimed = None
     started = time.time()
     result = {"src": src, "name": name, "ok": False, "error": "", "out": "",
               "bytes": 0, "fmt": "", "title": "", "artist": "", "lang": "", "notes": []}
@@ -146,15 +148,15 @@ def _convert(src, out_dir, keep, want_cover, want_lyrics, lrc_plain,
         target_dir = _target_dir(src, out_dir, parsed, lang_map, organize)
         result["lang"] = target_dir
         os.makedirs(target_dir, exist_ok=True)
-        # the extension is only known after decrypting, so stream to a temp name first
-        tmp_path = os.path.join(target_dir, "." + out_name + ".ncmtmp")
+
+        # The staging name must be unique per worker: two *different* songs can share a
+        # title, and a title-derived name would have them writing the same temp file.
+        staging_name = ".%s.%d.%d.ncmtmp" % (out_name, os.getpid(), threading.get_ident())
+        tmp_path = os.path.join(target_dir, staging_name)
         report("decrypt", 0.0)
         info = decrypt_to_file(src, tmp_path)
         report("decrypt", 1.0)
         fmt = info.fmt or "bin"
-        out_path = _dedupe(os.path.join(target_dir, out_name + "." + fmt))
-        _move_into_place(tmp_path, out_path, keep)
-        tmp_path = None
 
         cover = None
         cover_mime = ""
@@ -167,6 +169,8 @@ def _convert(src, out_dir, keep, want_cover, want_lyrics, lrc_plain,
         plain, lrc = split_lrc(lyrics) if lyrics else ("", "")
 
         report("tag")
+        # Tag the staged file *before* it is published: until this point the final name is
+        # untouched, so a failure here leaves nothing behind but the temp file.
         tag = TagInfo(
             title=info.meta.title or base,
             artists=info.meta.artists,
@@ -175,14 +179,20 @@ def _convert(src, out_dir, keep, want_cover, want_lyrics, lrc_plain,
             cover_mime=cover_mime,
             lyrics=plain,
         )
-        status = write_tags(out_path, fmt, tag)
+        status = write_tags(tmp_path, "flac" if fmt == "flac" else fmt, tag)
         if status not in ("tagged", "no-tags"):
             result["notes"].append("tags:" + status)
 
+        # Now claim the final name atomically and publish in one step.
+        claimed = _claim_path(os.path.join(target_dir, out_name + "." + fmt))
+        out_path = claimed
+        _move_into_place(tmp_path, out_path, keep)
+        tmp_path = None
+        stem = os.path.splitext(out_path)[0]
+
         # sidecar lyrics file
         if lyrics and want_lyrics:
-            lrc_path = os.path.join(target_dir, out_name + ".lrc")
-            with open(lrc_path, "w", encoding="utf-8") as fh:
+            with open(stem + ".lrc", "w", encoding="utf-8") as fh:
                 fh.write((plain if lrc_plain else lrc) + "\n")
 
         # only now, with the audio and tags both written, is it safe to drop the source
@@ -210,18 +220,57 @@ def _convert(src, out_dir, keep, want_cover, want_lyrics, lrc_plain,
                 os.remove(tmp_path)
             except OSError:
                 pass
+        # if we reserved a final name but never published, release the placeholder so the
+        # directory is not littered with zero-byte files
+        if claimed and not result["ok"]:
+            _release_claim(claimed)
         result["seconds"] = round(time.time() - started, 2)
     return result
 
 
-def _dedupe(path: str) -> str:
-    if not os.path.exists(path):
-        return path
-    stem, ext = os.path.splitext(path)
-    index = 2
-    while os.path.exists("%s (%d)%s" % (stem, index, ext)):
-        index += 1
-    return "%s (%d)%s" % (stem, index, ext)
+def _claim_path(target: str) -> str:
+    """Atomically reserve a final output path, returning the name actually claimed.
+
+    A placeholder is created with O_CREAT|O_EXCL, which is the only check-then-create a
+    second thread cannot win. Without this, two conversions of different songs that happen
+    to share a title would pick the same output name and overwrite each other.
+    """
+    stem, ext = os.path.splitext(target)
+    index = 0
+    while True:
+        candidate = target if index == 0 else "%s (%d)%s" % (stem, index, ext)
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            index += 1
+            if index > 9999:                       # pathological; give up loudly
+                raise
+            continue
+        os.close(fd)
+        return candidate
+
+
+def _release_claim(claimed: str) -> None:
+    """Drop our placeholder if we never managed to publish over it."""
+    try:
+        os.remove(claimed)
+    except OSError:
+        pass
+
+
+def _move_into_place(tmp_path: str, out_path: str, keep: bool) -> None:
+    """Publish the finished file, replacing our own placeholder atomically.
+
+    Falls back to copy+delete across volumes. An already-existing file is not an error:
+    that is our own reservation from ``_claim_path``.
+    """
+    try:
+        os.replace(tmp_path, out_path)
+        return
+    except OSError:
+        pass
+    shutil.copyfile(tmp_path, out_path)
+    os.remove(tmp_path)
 
 
 def _target_dir(src, out_dir, parsed, lang_map, organize):
@@ -359,8 +408,13 @@ def _move_into_place(tmp_path: str, out_path: str, keep: bool) -> None:
     os.remove(tmp_path)
 
 
-def _fetch_cover(url: str, timeout: int = 20):
-    """Download cover art. Failure is never fatal."""
+def _fetch_cover(url: str, timeout: int = 20, limit: int = 12 << 20):
+    """Download cover art. Failure is never fatal.
+
+    The read is capped: an unbounded ``resp.read()`` on a hostile or broken CDN response
+    would happily pull gigabytes into memory (and the cover ends up embedded in the file
+    anyway, where a sane one is a few hundred KB).
+    """
     if not url:
         return None, ""
     try:
@@ -373,12 +427,16 @@ def _fetch_cover(url: str, timeout: int = 20):
             "Referer": "https://music.163.com/",
         })
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            data = resp.read()
+            data = resp.read(limit + 1)
+        if len(data) > limit:
+            return None, ""            # implausibly large: treat as a failed download
         if not data:
             return None, ""
         mime = "image/jpeg"
         if data[:8] == b"\x89PNG\r\n\x1a\n":
             mime = "image/png"
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            mime = "image/webp"
         return data, mime
     except Exception:
         return None, ""

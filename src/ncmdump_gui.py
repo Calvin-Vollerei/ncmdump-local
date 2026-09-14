@@ -236,7 +236,7 @@ def enable_shadow(hwnd: int) -> None:
 
 # --- Qt ---------------------------------------------------------------------
 
-from PySide6.QtCore import QObject, QRectF, QStandardPaths, Qt, QTimer, Signal  # noqa: E402
+from PySide6.QtCore import QRectF, QStandardPaths, Qt, QTimer, Signal  # noqa: E402
 from PySide6.QtGui import (  # noqa: E402
     QColor,
     QFont,
@@ -368,13 +368,6 @@ QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
 QScrollBar::handle:vertical { background: rgba(255, 255, 255, 80); border-radius: 4px; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 """
-
-
-class Bridge(QObject):
-    """Signals so worker threads never touch widgets directly."""
-
-    progressed = Signal(dict)
-    finished = Signal(dict)
 
 
 class DropZone(QFrame):
@@ -525,9 +518,9 @@ class MainWindow(QWidget):
         self.resize(940, 700)
         self.setMinimumSize(760, 560)
 
-        self.bridge = Bridge()
-        self.bridge.progressed.connect(self._handle_stage)
-        self.bridge.finished.connect(self._finish)
+        # Workers never touch widgets: they post plain dicts here and the main thread's
+        # timer drains it. (An earlier signal-based bridge was wired up but never emitted,
+        # which just looked like a safety mechanism without being one.)
         self.queue = Queue()
         self.cancel_flag = threading.Event()
         self.pool = None
@@ -719,13 +712,6 @@ class MainWindow(QWidget):
                 self._apply_win_effects()
             except Exception as exc:      # a missing blur must never break the window
                 _boot_log("window effects failed: %s" % exc)
-        QTimer.singleShot(150, self._refresh_backdrop)
-
-    def _refresh_backdrop(self):
-        try:
-            self.backdrop.update_backdrop()
-        except Exception as exc:
-            _boot_log("backdrop refresh failed: %s" % exc)
 
     def _apply_win_effects(self):
         hwnd = int(self.winId())
@@ -822,12 +808,15 @@ class MainWindow(QWidget):
 
     # --------------------------------------------------------------- run
     def _clean_stale_tempfiles(self, out_dir: str) -> int:
-        """Remove leftover `.<name>.ncmtmp` files from a previously killed run.
+        """Remove leftover `*.ncmtmp` files from a previously killed run.
 
         They are dot-prefixed and therefore invisible in Explorer, and a run that was
         force-killed cannot clean up after itself — so sweep them when a new run starts.
+        Only files older than an hour are touched: a *live* worker's staging file has the
+        same shape, and deleting that would corrupt an in-flight conversion.
         """
         removed = 0
+        cutoff = time.time() - 3600
         roots = {os.path.dirname(os.path.abspath(p)) for p in self.files if os.path.isfile(p)}
         if out_dir:
             roots.add(os.path.abspath(out_dir))
@@ -838,12 +827,16 @@ class MainWindow(QWidget):
         for root in roots:
             try:
                 for name in os.listdir(root):
-                    if name.startswith(".") and name.endswith(".ncmtmp"):
-                        try:
-                            os.remove(os.path.join(root, name))
-                            removed += 1
-                        except OSError:
-                            pass
+                    if not (name.startswith(".") and name.endswith(".ncmtmp")):
+                        continue
+                    path = os.path.join(root, name)
+                    try:
+                        if os.path.getmtime(path) > cutoff:
+                            continue          # possibly a running conversion
+                        os.remove(path)
+                        removed += 1
+                    except OSError:
+                        pass
             except OSError:
                 continue
         return removed
