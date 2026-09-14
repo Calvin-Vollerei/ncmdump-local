@@ -821,6 +821,33 @@ class MainWindow(QWidget):
             self.log_scroll.verticalScrollBar().maximum()))
 
     # --------------------------------------------------------------- run
+    def _clean_stale_tempfiles(self, out_dir: str) -> int:
+        """Remove leftover `.<name>.ncmtmp` files from a previously killed run.
+
+        They are dot-prefixed and therefore invisible in Explorer, and a run that was
+        force-killed cannot clean up after itself — so sweep them when a new run starts.
+        """
+        removed = 0
+        roots = {os.path.dirname(os.path.abspath(p)) for p in self.files if os.path.isfile(p)}
+        if out_dir:
+            roots.add(os.path.abspath(out_dir))
+            if self.chk_organize.isChecked():
+                for sub in (self.ed_ja.text().strip(), self.ed_other.text().strip()):
+                    if sub:
+                        roots.add(os.path.join(os.path.abspath(out_dir), sub))
+        for root in roots:
+            try:
+                for name in os.listdir(root):
+                    if name.startswith(".") and name.endswith(".ncmtmp"):
+                        try:
+                            os.remove(os.path.join(root, name))
+                            removed += 1
+                        except OSError:
+                            pass
+            except OSError:
+                continue
+        return removed
+
     def start(self):
         if not self.files:
             self._append_log("请先拖入或选择 .ncm 文件")
@@ -834,6 +861,10 @@ class MainWindow(QWidget):
             except OSError as exc:
                 self._append_log("输出目录不可用：%s" % exc)
                 return
+
+        stale = self._clean_stale_tempfiles(out_dir)
+        if stale:
+            self._append_log("清理了 %d 个上次中断残留的临时文件" % stale)
 
         lang_map = None
         if self.chk_organize.isChecked():
@@ -986,6 +1017,29 @@ def _redact(text: str) -> str:
     return text
 
 
+def _log_path() -> str:
+    """Full path of the startup log, in the first writable location.
+
+    Falling back matters: in a locked-down environment the per-user log directory can be
+    unwritable, and silently losing the breadcrumbs would leave a windowed build with no
+    diagnostics at all. The temp directory is the last resort.
+    """
+    import tempfile
+
+    candidates = [_log_dir(), os.path.join(tempfile.gettempdir(), "NCMConverter")]
+    for directory in candidates:
+        try:
+            os.makedirs(directory, exist_ok=True)
+            probe = os.path.join(directory, ".write-test")
+            with open(probe, "w", encoding="utf-8"):
+                pass
+            os.remove(probe)
+            return os.path.join(directory, "ncm_gui_startup.log")
+        except OSError:
+            continue
+    return os.path.join(candidates[-1], "ncm_gui_startup.log")
+
+
 def _boot_log(msg: str) -> None:
     """Append a startup breadcrumb to the user log directory.
 
@@ -994,10 +1048,7 @@ def _boot_log(msg: str) -> None:
     redacted and the file never lands in the project tree.
     """
     try:
-        directory = _log_dir()
-        os.makedirs(directory, exist_ok=True)
-        path = os.path.join(directory, "ncm_gui_startup.log")
-        with open(path, "a", encoding="utf-8") as fh:
+        with open(_log_path(), "a", encoding="utf-8") as fh:
             fh.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), _redact(msg)))
     except Exception:
         pass
