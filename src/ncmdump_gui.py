@@ -24,6 +24,11 @@ from queue import Empty, Queue
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+try:
+    from ncmdump.metadata import DEVELOPER, RELEASES_URL, VERSION
+except ImportError:                       # pragma: no cover - only before build/install
+    DEVELOPER, RELEASES_URL, VERSION = "Calvin Vollerei Studio", "", "0.0.0"
+
 # --- window material --------------------------------------------------------
 #
 # pywinstyles drives the Windows composition APIs for us: "acrylic" paints the background
@@ -301,6 +306,7 @@ QWidget { color: #eaf0ff; font-family: "Microsoft YaHei UI", "Segoe UI", sans-se
 #title { font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }
 #subtitle { color: rgba(232, 240, 255, 225); font-size: 11px; }
 #langTag { color: rgba(190, 222, 255, 215); font-size: 10px; letter-spacing: 0.5px; }
+#footerText { color: rgba(206, 220, 248, 190); font-size: 11px; }
 QComboBox {
     background: rgba(255, 255, 255, 44); border: none; border-radius: 9px;
     padding: 7px 11px; color: #eef3ff;
@@ -737,6 +743,25 @@ class MainWindow(QWidget):
         self.log_scroll = scroll
         outer.addWidget(scroll, 1)
 
+        # ---- footer: version + developer (left), update check (right)
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+        self.lbl_version = QLabel("v%s · %s" % (VERSION, DEVELOPER))
+        self.lbl_version.setObjectName("footerText")
+        self.lbl_version.setToolTip("版本 %s，由 %s 开发" % (VERSION, DEVELOPER))
+        self.lbl_update = QLabel("")
+        self.lbl_update.setObjectName("footerText")
+        self.lbl_update.setOpenExternalLinks(True)
+        self.btn_update = QPushButton("检查更新")
+        self.btn_update.setObjectName("ghost")
+        self.btn_update.setToolTip("从 GitHub Releases 检查是否有新版本（需要联网）")
+        self.btn_update.clicked.connect(self.check_updates)
+        footer.addWidget(self.lbl_version)
+        footer.addStretch(1)
+        footer.addWidget(self.lbl_update)
+        footer.addWidget(self.btn_update)
+        outer.addLayout(footer)
+
         self._on_organize_changed(self.cmb_organize.currentIndex())
 
     # ----------------------------------------------------------- window chrome
@@ -781,6 +806,49 @@ class MainWindow(QWidget):
         _boot_log("window: material=%s hwnd=%d native_frame=True" % (self._material, hwnd))
 
     # ---------------------------------------------------------------- helpers
+    def check_updates(self):
+        """Ask GitHub for the latest release, off the UI thread."""
+        if getattr(self, "_update_busy", False):
+            return
+        self._update_busy = True
+        self.btn_update.setEnabled(False)
+        self.lbl_update.setText("检查中…")
+        self.lbl_update.setOpenExternalLinks(False)
+        self._append_log("正在检查更新…（%s）" % RELEASES_URL)
+
+        def work():
+            try:
+                from ncmdump.metadata import check_for_update
+                info = check_for_update()
+            except Exception as exc:                 # never let a button crash the app
+                info = {"status": "unavailable", "error": "%s: %s" % (type(exc).__name__, exc)}
+            self.queue.put(("update", info))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_result(self, info):
+        self._update_busy = False
+        self.btn_update.setEnabled(True)
+        status = info.get("status")
+        if status == "update":
+            latest = info.get("latest", "")
+            url = info.get("url") or RELEASES_URL
+            self.lbl_update.setText(
+                '有新版本 <a href="%s" style="color:#9ad8ff;">%s</a>（当前 v%s）'
+                % (url, latest, VERSION))
+            self.lbl_update.setOpenExternalLinks(True)
+            self._append_log("发现新版本 %s：%s" % (latest, url))
+        elif status == "current":
+            self.lbl_update.setText("已是最新版本")
+            self._append_log("已是最新版本（v%s）" % VERSION)
+        else:
+            reason = info.get("error", "未知原因")
+            self.lbl_update.setText(
+                '检查失败，<a href="%s" style="color:#9ad8ff;">手动查看 Releases</a>'
+                % RELEASES_URL)
+            self.lbl_update.setOpenExternalLinks(True)
+            self._append_log("更新检查不可用：%s" % reason)
+
     def organize_settings(self):
         """Translate the controls into (lang_map, organize, mode) for the converter.
 
@@ -1018,6 +1086,8 @@ class MainWindow(QWidget):
                 self._handle_result(payload)
             elif kind == "stage":
                 self._handle_stage(payload)
+            elif kind == "update":
+                self._on_update_result(payload)
             elif kind == "fatal":
                 self._append_log("致命错误：" + payload.get("error", ""))
             elif kind == "done":
@@ -1175,6 +1245,8 @@ def main(argv=None) -> int:
         window.add_paths([])
         from ncmdump.ncm_core import _numpy, xor_keystream
         lines = [
+            "version         = %s" % VERSION,
+            "developer       = %s" % DEVELOPER,
             "frozen          = %s" % getattr(sys, "frozen", False),
             "executable      = %s" % sys.executable,
             "python          = %s" % sys.version.split()[0],

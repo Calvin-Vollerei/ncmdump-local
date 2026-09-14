@@ -9,7 +9,9 @@ description = "Convert NetEase Cloud Music .ncm files to playable FLAC/MP3 local
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
-authors = [{ name = "ncm2mp3 contributors" }]
+authors = [
+    { name = "Calvin Vollerei Studio" },
+]
 keywords = ["ncm", "netease", "netease-cloud-music", "flac", "mp3", "converter", "decrypt"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -55,9 +57,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/OWNER/ncmdump-local"
-Repository = "https://github.com/OWNER/ncmdump-local"
-Issues = "https://github.com/OWNER/ncmdump-local/issues"
+Homepage = "https://github.com/Calvin-Vollerei/ncmdump-local"
+Repository = "https://github.com/Calvin-Vollerei/ncmdump-local"
+Issues = "https://github.com/Calvin-Vollerei/ncmdump-local/issues"
+Releases = "https://github.com/Calvin-Vollerei/ncmdump-local/releases"
+Changelog = "https://github.com/Calvin-Vollerei/ncmdump-local/releases"
 
 [project.scripts]
 ncmdump = "ncmdump.ncm2mp3:main"
