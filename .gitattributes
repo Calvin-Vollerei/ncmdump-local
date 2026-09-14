@@ -1,0 +1,17 @@
+# Keep line endings identical on every platform. Without this, a Windows checkout
+# rewrites text files to CRLF, which changes sha256 sums and can break the CI shell steps.
+* text=auto eol=lf
+
+# Binary-ish files that must never be normalised
+*.pyc binary
+*.pyd binary
+*.dll binary
+*.exe binary
+*.whl binary
+*.png binary
+*.ico binary
+
+# GitHub picks these up automatically; keep them out of language stats noise
+.github/ linguist-documentation
+NOTICE.md linguist-documentation
+SECURITY.md linguist-documentation

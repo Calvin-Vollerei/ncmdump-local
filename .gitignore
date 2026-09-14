@@ -1,0 +1,115 @@
+# ---- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- virtualenvs ------------------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# ---- packaging / build output ----------------------------------------------
+dist/
+build/
+*.spec.bak
+!ncm_gui.spec
+
+# PyInstaller
+*.manifest
+*.pkg
+warn-*.txt
+xref-*.html
+
+# ---- test / coverage / lint -------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache
+.mypy_cache/
+.ruff_cache/
+
+# ---- editors / OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---- local runtime output ---------------------------------------------------
+# startup breadcrumbs and crash logs written next to the executable
+ncm_gui_startup.log
+*.log
+
+# ---- NEVER commit any of this ----------------------------------------------
+# DRM-protected containers and the media/lyrics they carry
+*.ncm
+*.uc
+*.kwm
+*.qmc*
+*.mflac*
+*.mgg*
+*.kgm*
+*.kgma
+*.tm[0-9]
+*.bkc*
+*.vpr
+*.xm
+
+# audio, lyrics, artwork
+*.flac
+*.mp3
+*.m4a
+*.aac
+*.ogg
+*.wav
+*.ape
+*.dff
+*.wma
+*.lrc
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+
+# local scratch: scraped site bundles, reference decryptors, fixtures, wheels
+ncm-work/
+wheels/
+fixtures/
+*.whl
+
+# environment / secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# personal notes that live next to the music library
+拷贝后其他播放器不可播放的解决方案.txt
