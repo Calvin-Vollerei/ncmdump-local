@@ -1157,13 +1157,18 @@ def _redact(text: str) -> str:
                   os.environ.get("TEMP", "")):
         if known:
             text = text.replace(known, "%USER%")
-    # keep only the flag names from the command line, never the values (they carry paths)
-    text = re.sub(r"(?<=\s)--[\w-]+=[^\s'\"]+", "--<redacted>", text)
+    # Keep the flag NAME, redact only its value: knowing which switches were used is the
+    # point of a breadcrumb, while the value is what carries a path. The lookbehind accepts
+    # a quote as well as whitespace so a repr()-ed argv is handled too.
+    text = re.sub(r"(?<=[\s'\"])--([\w-]+)=[^\s'\"]+", r"--\1=<redacted>", text)
+    # A verbatim absolute path can also reach a log inside an exception message, where no
+    # --flag= prefix exists to key off. Redact the whole path rather than just one form.
+    text = re.sub(r"[A-Za-z]:[\\/][^\s'\"]*", "%PATH%", text)
     return text
 
 
-def _log_path() -> str:
-    """Full path of the startup log, in the first writable location.
+def _log_file(name: str) -> str:
+    """Path of a diagnostic log file, in the first writable location.
 
     Falling back matters: in a locked-down environment the per-user log directory can be
     unwritable, and silently losing the breadcrumbs would leave a windowed build with no
@@ -1179,10 +1184,15 @@ def _log_path() -> str:
             with open(probe, "w", encoding="utf-8"):
                 pass
             os.remove(probe)
-            return os.path.join(directory, "ncm_gui_startup.log")
+            return os.path.join(directory, name)
         except OSError:
             continue
-    return os.path.join(candidates[-1], "ncm_gui_startup.log")
+    return os.path.join(candidates[-1], name)
+
+
+def _log_path() -> str:
+    """Full path of the startup log."""
+    return _log_file("ncm_gui_startup.log")
 
 
 def _boot_log(msg: str) -> None:
@@ -1209,8 +1219,8 @@ def main(argv=None) -> int:
         import atexit
 
         def trace(msg):
-            with open("ncm-work/gui_trace.log", "a", encoding="utf-8") as fh:
-                fh.write("%s pid=%d %s\n" % (time.strftime("%H:%M:%S"), os.getpid(), msg))
+            with open(_log_file("gui_trace.log"), "a", encoding="utf-8") as fh:
+                fh.write("%s pid=%d %s\n" % (time.strftime("%H:%M:%S"), os.getpid(), _redact(msg)))
 
         def _bye():
             trace("exiting")
