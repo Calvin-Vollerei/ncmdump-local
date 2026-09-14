@@ -22,6 +22,7 @@ a = Analysis(
     datas=[],
     hiddenimports=[
         "ncmdump",
+        "ncmdump.metadata",
         "ncmdump.ncm_core",
         "ncmdump.ncm2mp3",
         "ncmdump.tags",
