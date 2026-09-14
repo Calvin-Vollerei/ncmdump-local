@@ -32,11 +32,49 @@ git push -u origin main
 在仓库页面 → Releases → Draft a new release：
 
 1. **Tag** 填 `v1.0.0`（必须与 `metadata.py` 里的 `VERSION` 同源；前缀 `v` 可有可无）；
-2. 标题随意，说明里写更新日志；
-3. 附件可上传打包好的 `NCMConverter` 压缩包；
-4. Publish。
+2. 标题写 `v1.0.0`；
+3. 说明直接粘贴 `release/RELEASE-NOTES.md` 的内容（中英双语）；
+4. 附件上传 **`NCMConverter-1.0.0-win64.zip`** 和 `SHA256.txt`；
+5. Publish。
 
-之后客户端点「检查更新」会请求
+### 关于附件：不要只传 exe
+
+程序是 **onedir** 形式，`NCMConverter.exe` 需要同级的 `_internal` 目录（约 87 MB）。
+实测把 exe 单独复制出去运行会**直接退出**（exit -1，连日志都不生成），
+所以 exe 不能作为单独附件发布。
+
+发布包的做法（`release/` 目录）：
+
+```
+NCMConverter-1.0.0-win64/          打包进 zip（约 35 MB）
+  NCMConverter/                     ← 程序本体（exe + _internal）
+  启动转换器.bat                     ← 启动器（纯 ASCII，避免 cmd 解析问题）
+  使用说明-README.md                 ← 中英双语使用说明
+  LICENSE  NOTICE.md
+SHA256.txt                         单独上传，便于校验
+```
+
+重新生成发布包的步骤：
+
+```powershell
+# 1) 先按 README 的说明构建 EXE，产物在 ncm2mp3\build\dist\NCMConverter
+# 2) 组包
+$stage = "release\NCMConverter-1.0.0-win64"
+Remove-Item "release" -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+Copy-Item "dist\NCMConverter" (Join-Path $stage "NCMConverter") -Recurse
+Copy-Item "ncm2mp3\LICENSE","ncm2mp3\NOTICE.md" $stage
+# 再把 启动转换器.bat 与 使用说明-README.md 放进去
+Compress-Archive -Path $stage -DestinationPath "release\NCMConverter-1.0.0-win64.zip" -CompressionLevel Optimal
+# 3) 出校验值
+"$((Get-FileHash 'release\NCMConverter-1.0.0-win64.zip' -Algorithm SHA256).Hash.ToLower())  NCMConverter-1.0.0-win64.zip" | Set-Content "release\SHA256.txt" -Encoding ASCII
+```
+
+> 启动器 `.bat` **必须纯 ASCII**：`cmd.exe` 在部分代码页下会把含中文/全角符号的
+> `rem` 注释当成命令执行（实测会打印 `'Calvin' is not recognized as an internal or
+> external command`）。使用说明写在单独的 `.md` 里，不要写进 bat。
+
+发版之后客户端点「检查更新」会请求
 `https://api.github.com/repos/Calvin-Vollerei/ncmdump-local/releases/latest`，
 对比 `tag_name` 与本地 `VERSION`：
 
@@ -46,6 +84,11 @@ git push -u origin main
 
 > 公开仓库的该接口无需 token，但有速率限制（未认证约 60 次/小时/IP）。
 > 私有仓库需要 token，本项目的检查不支持，请改用「手动查看 Releases」。
+
+### 版本号要改的地方
+
+发新版时改 `src/ncmdump/metadata.py` 的 `VERSION`，并同步 `pyproject.toml` 的 `version`
+（有一条测试会检查两者不许漂移）。
 
 ---
 

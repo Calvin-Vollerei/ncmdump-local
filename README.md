@@ -2,6 +2,11 @@
 
 把网易云音乐的 `.ncm` 文件**在本地**转换成可播放的 FLAC/MP3，支持图形界面与命令行。
 
+> Convert NetEase Cloud Music `.ncm` files to playable FLAC/MP3 **locally** — GUI and CLI.
+> Pure-Python core with **no third-party runtime dependencies**, fully offline: nothing is
+> uploaded and no account is involved. A prebuilt Windows build is attached to
+> [Releases](https://github.com/Calvin-Vollerei/ncmdump-local/releases).
+
 * **核心零第三方依赖** —— 纯 Python 标准库实现 AES、容器解析、FLAC/ID3 标签写入
 * **全程离线** —— 不联网、不上传、不涉及账号
 * **图形界面**用系统原生窗口 + Windows 材质（Aero）
@@ -9,6 +14,20 @@
 > **免责声明**：本项目仅做**本地格式转换**，用于转换你自己合法获得的文件。
 > 它不绕过任何账号或付费校验，也不包含任何音频/歌词素材。
 > 使用前请阅读 [NOTICE.md](NOTICE.md) 中的授权范围与风险说明。
+>
+> *Disclaimer: format conversion only, for files you obtained legally. It bypasses no
+> account or payment check and ships no audio or lyrics. See [NOTICE.md](NOTICE.md).*
+
+功能一览 / At a glance:
+
+| 中文 | English |
+| --- | --- |
+| 批量多线程转换，进度与速度实时显示 | Batch, multi-threaded, with live progress and speed |
+| 按语言 / 按歌手 / 语言+歌手 两级的目录整理，文件夹名可自定义 | Organise by language / artist / both, folder names editable |
+| 「预览落点」先看每首歌放哪 | Preview where every track will land |
+| 保留标签、歌词、封面，可导出 `.lrc` | Keeps tags, lyrics, cover art; optional `.lrc` sidecar |
+| 删除原文件前逐字节校验 | Byte-for-byte verification before deleting a source |
+| 磨砂玻璃界面、原生窗口、检查更新 | Frosted glass, native window, update check |
 
 ---
 
