@@ -250,3 +250,92 @@ def test_module_import_does_not_pull_the_pool_or_numpy():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "False False False", out.stdout
+
+
+# --- folder routing ----------------------------------------------------------
+
+LANG_MAP = {"__mode__": "language", "ja": "日文", "zh": "中文", "ko": "韩文",
+            "ru": "俄文", "other": "其他"}
+
+
+def _route(path, lang_map, organize=True, organize_by="language", artist=False,
+           out_dir="/out"):
+    """Return the routing decision relative to `out_dir`.
+
+    A non-empty out_dir is required: an empty one means "next to each source file", which
+    would make every expectation below absolute paths.
+    """
+    from ncmdump.ncm2mp3 import _organize_options, _target_dir
+    from ncmdump.ncm_core import decrypt_file
+
+    mode, artist_flag, folders = _organize_options(lang_map)
+    if organize_by != "language":
+        mode = organize_by
+    parsed = decrypt_file(path, read_audio=False)
+    target = _target_dir(path, out_dir, parsed, folders, organize, mode,
+                         artist or artist_flag)
+    return os.path.relpath(target, out_dir) if target != out_dir else ""
+
+
+def test_organize_options_splits_reserved_keys():
+    from ncmdump.ncm2mp3 import _organize_options
+
+    assert _organize_options(None) == ("none", False, {})
+    assert _organize_options(LANG_MAP) == ("language", False,
+                                           {"ja": "日文", "zh": "中文", "ko": "韩文",
+                                            "ru": "俄文", "other": "其他"})
+    # the historical shape (plain code -> folder) still works
+    assert _organize_options({"ja": "J", "other": "O"}) == ("language", False,
+                                                            {"ja": "J", "other": "O"})
+
+
+@pytest.mark.parametrize("title,artists,expected", [
+    ("いつか", ["宇多田ヒカル"], os.path.join("日文", "宇多田ヒカル")),
+    ("晴天", ["周杰伦"], os.path.join("中文", "周杰伦")),
+    ("사랑은 언제나", ["단비"], os.path.join("韩文", "단비")),
+    ("За тебя", ["Макsим"], os.path.join("俄文", "Макsим")),
+    ("Heat Waves", ["Glass Animals"], os.path.join("其他", "Glass Animals")),
+])
+def test_language_then_artist_layout(tmp_path, title, artists, expected):
+    path = _fixture(str(tmp_path), "x.ncm", title, artists=artists)
+    assert _route(path, LANG_MAP, artist=True) == expected
+
+
+@pytest.mark.parametrize("title,artists,expected", [
+    ("いつか", ["宇多田ヒカル"], "日文"),
+    ("晴天", ["周杰伦"], "中文"),
+    ("사랑은 언제나", ["단비"], "韩文"),
+    ("За тебя", ["Макsим"], "俄文"),
+    ("Heat Waves", ["Glass Animals"], "其他"),
+])
+def test_language_only_layout(tmp_path, title, artists, expected):
+    path = _fixture(str(tmp_path), "y.ncm", title, artists=artists)
+    assert _route(path, LANG_MAP) == expected
+
+
+def test_artist_only_layout(tmp_path):
+    path = _fixture(str(tmp_path), "z.ncm", "Song", artists=["Hoang", "Guest"])
+    assert _route(path, None, organize_by="artist") == "Hoang"
+
+
+def test_custom_folder_names_are_honoured(tmp_path):
+    path = _fixture(str(tmp_path), "w.ncm", "曲", artists=["誰か"])
+    custom = dict(LANG_MAP, ja="J-Pop 日系")
+    assert _route(path, custom) == "J-Pop 日系"
+
+
+def test_unknown_language_falls_back_to_the_other_folder(tmp_path):
+    path = _fixture(str(tmp_path), "v.ncm", "plain english", artists=["Someone"])
+    assert _route(path, {"__mode__": "language", "ja": "J", "other": "杂项"}) == "杂项"
+
+
+def test_folder_names_are_sanitised(tmp_path):
+    """A folder name typed by the user can contain characters Windows rejects."""
+    path = _fixture(str(tmp_path), "u.ncm", "いつか", artists=["A"])
+    assert "/" not in _route(path, {"__mode__": "language", "ja": "a/b", "other": "o"})
+
+
+def test_organize_none_keeps_everything_flat(tmp_path):
+    path = _fixture(str(tmp_path), "t.ncm", "いつか", artists=["A"])
+    assert _route(path, LANG_MAP, organize=False) == ""
+    assert _route(path, LANG_MAP, organize_by="none") == ""

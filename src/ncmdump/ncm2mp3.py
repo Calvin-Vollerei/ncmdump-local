@@ -29,10 +29,10 @@ import time
 if __package__ in (None, ""):  # 允许 `python ncmdump/ncm2mp3.py` 直接运行
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from ncmdump.ncm_core import NcmError, decrypt_file, decrypt_to_file
-    from ncmdump.tags import TagInfo, guess_language, write_tags
+    from ncmdump.tags import TagInfo, artist_folder, guess_language, write_tags
 else:
     from .ncm_core import NcmError, decrypt_file, decrypt_to_file
-    from .tags import TagInfo, guess_language, write_tags
+    from .tags import TagInfo, artist_folder, guess_language, write_tags
 
 ILLEGAL = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
@@ -114,6 +114,23 @@ def split_lrc(lyrics: str):
     return "\n".join(plain), lrc
 
 
+def _organize_options(lang_map):
+    """Split a lang_map into (mode, artist_folders, {code: folder}).
+
+    The reserved ``__mode__`` / ``__artist__`` keys travel with the mapping so the extra
+    options reach the worker through the existing job tuple instead of widening it.
+    """
+    if not lang_map:
+        return "none", False, {}
+    mapping = dict(lang_map)
+    mode = mapping.pop("__mode__", "language")
+    artist = bool(mapping.pop("__artist__", False))
+    # tolerate the historical shape where only {"ja": .., "other": ..} was passed
+    if mode not in ("language", "artist", "none"):
+        mode = "language"
+    return mode, artist, mapping
+
+
 def convert_one(job):
     """Worker: decrypt one file, write tags + lyrics. Returns a result dict."""
     (src, out_dir, keep, want_cover, want_lyrics, lrc_plain, lang_map, organize, verify) = job
@@ -125,6 +142,9 @@ def _convert(src, out_dir, keep, want_cover, want_lyrics, lrc_plain,
              lang_map, organize, verify, progress=None):
     """The actual conversion. `progress(stage, fraction)` is called as work proceeds so a
     GUI can show movement during a single (possibly 200 MB) file."""
+    organize_by, artist_folders, folders = _organize_options(lang_map)
+    organize = organize and organize_by != "none"
+    lang_map = folders
     name = os.path.basename(src)
     base = os.path.splitext(name)[0]
     tmp_path = None
@@ -145,7 +165,8 @@ def _convert(src, out_dir, keep, want_cover, want_lyrics, lrc_plain,
         # lyrics are read up front: they are the more reliable language signal when the
         # title is romanised, and --organize keys off the language
         lyrics = load_lyrics(src)
-        target_dir = _target_dir(src, out_dir, parsed, lang_map, organize)
+        target_dir = _target_dir(src, out_dir, parsed, lang_map, organize,
+                                 organize_by, artist_folders)
         result["lang"] = target_dir
         os.makedirs(target_dir, exist_ok=True)
 
@@ -273,19 +294,41 @@ def _move_into_place(tmp_path: str, out_path: str, keep: bool) -> None:
     os.remove(tmp_path)
 
 
-def _target_dir(src, out_dir, parsed, lang_map, organize):
+def _target_dir(src, out_dir, parsed, lang_map, organize,
+                organize_by="language", artist_folders=False):
     """Pick the destination folder for one track.
+
+    Two independent levels can be combined:
+
+    * ``organize_by`` — ``"language"`` groups by detected script, ``"artist"`` by the first
+      credited artist, ``"none"`` keeps everything flat. ``lang_map`` maps a language code
+      to a folder name (fully user-editable).
+    * ``artist_folders`` — when grouping by language this adds a per-artist sub-folder, so
+      ``language/artist/`` falls out of the same settings.
 
     Language comes from the metadata *and* the sidecar lyrics: a Japanese track with a
     romanised title carries no kana in its tags, and would otherwise land in "other".
     """
-    if organize and lang_map:
-        lyrics = load_lyrics(src)
-        lang = guess_language(parsed.meta.title, parsed.meta.artists, parsed.meta.album,
-                              lyrics)
-        sub = lang_map.get(lang) or lang_map.get("other") or ""
-        return os.path.join(out_dir, sub) if sub else out_dir
-    return out_dir or os.path.dirname(os.path.abspath(src))
+    parts = []
+    if organize and lang_map is not None:
+        if organize_by == "artist":
+            sub = sanitize(artist_folder(parsed.meta.artists), "")
+            if sub:
+                parts.append(sub)
+        elif organize_by == "language":
+            lyrics = load_lyrics(src)
+            lang = guess_language(parsed.meta.title, parsed.meta.artists, parsed.meta.album,
+                                  lyrics)
+            sub = lang_map.get(lang) or lang_map.get("other") or ""
+            if sub:
+                parts.append(sanitize(sub, "Other"))
+            if artist_folders:
+                sub = sanitize(artist_folder(parsed.meta.artists), "")
+                if sub:
+                    parts.append(sub)
+
+    base = out_dir or os.path.dirname(os.path.abspath(src))
+    return os.path.join(base, *parts) if parts else base
 
 
 def _flac_or_id3_audio_offset(blob: bytes, fmt: str) -> int:
@@ -508,19 +551,26 @@ def main(argv=None) -> int:
                         help="只打印每首歌将落到哪个目录（配合 --organize 使用），不转换")
     parser.add_argument("--no-recursive", action="store_true", help="不递归子目录")
     parser.add_argument("--organize", metavar="MAP",
-                        help="按检测到的语言分目录，如 \"ja=VIP(Japanness),other=VIP(Other language)\"；"
-                             "未列出的语言落到 other 指定的目录")
+                        help="语言 -> 目录名，如 \"ja=J-Pop,zh=中文,ko=K-Pop,ru=Русский,other=其他\"；"
+                             "未列出的语言落到 other 指定的目录（默认：不按语言分目录）")
+    parser.add_argument("--organize-by", choices=["language", "artist", "none"],
+                        default="language",
+                        help="分目录依据：language=按语种；artist=按歌手；none=不分（默认 language）")
+    parser.add_argument("--artist-folders", action="store_true",
+                        help="在语言目录下再按歌手分一层（language/artist/…）")
     args = parser.parse_args(argv)
 
     lang_map = None
-    if args.organize:
-        lang_map = {}
-        for part in args.organize.split(","):
-            if not part.strip():
-                continue
-            key, _, value = part.partition("=")
-            lang_map[key.strip().lower()] = value.strip()
-        if not lang_map.get("other"):
+    if args.organize or args.organize_by == "artist":
+        lang_map = {"__mode__": args.organize_by,
+                    "__artist__": bool(args.artist_folders)}
+        if args.organize:
+            for part in args.organize.split(","):
+                if not part.strip():
+                    continue
+                key, _, value = part.partition("=")
+                lang_map[key.strip().lower()] = value.strip()
+        if args.organize_by == "language" and not lang_map.get("other"):
             print("--organize 必须为 other 指定一个目录，例如 other=Others")
             return 2
 
@@ -538,16 +588,18 @@ def main(argv=None) -> int:
     if args.meta or args.plan:
         failures = 0
         buckets = {}
+        plan_by, plan_artist, plan_map = _organize_options(lang_map)
         for path in files:
             try:
                 info = decrypt_file(path, read_audio=False)
-                if args.plan and lang_map:
-                    lang = guess_language(info.meta.title, info.meta.artists, info.meta.album)
-                    sub = lang_map.get(lang) or lang_map.get("other") or ""
-                    target = os.path.join(args.out or "", sub) if sub else (args.out or "")
+                if args.plan and args.organize_by != "none":
+                    # reuse the real routing so the preview cannot drift from the run
+                    target = _target_dir(path, args.out or "", info, plan_map,
+                                         True, plan_by, plan_artist)
                     buckets.setdefault(target or "(源目录)", []).append(
                         "%s - %s" % (info.meta.artist_line or "?", info.meta.title or "?"))
-                    print("%-30s -> %s" % (info.meta.title[:30] or os.path.basename(path), target or "(源目录)"))
+                    print("%-30s -> %s" % (info.meta.title[:30] or os.path.basename(path),
+                                           target or "(源目录)"))
                 else:
                     print("%-46s %-5s %s - %s" % (
                         os.path.basename(path)[:46], info.fmt or "?",
@@ -558,12 +610,15 @@ def main(argv=None) -> int:
         if args.plan and buckets:
             print("\n汇总：")
             for target, items in sorted(buckets.items()):
-                print("  %-28s %d 首" % (target, len(items)))
+                print("  %-40s %d 首" % (os.path.relpath(target, args.out) if args.out
+                                         and target.startswith(args.out) else target,
+                                         len(items)))
         return 1 if failures else 0
 
     jobs = args.jobs or min(8, (os.cpu_count() or 4))
     payload = [(path, args.out, args.keep, not args.no_cover,
-                not args.no_lyrics, args.plain_lrc, lang_map, bool(args.organize),
+                not args.no_lyrics, args.plain_lrc, lang_map,
+                lang_map is not None and args.organize_by != "none",
                 not args.no_verify)
                for path in files]
 

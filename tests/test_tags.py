@@ -139,11 +139,37 @@ def test_unsupported_format_is_skipped(tmp_path):
     ("いつか", ["A"], "", "", "ja"),
     ("晴天", ["周杰伦"], "", "", "zh"),
     ("Heat Waves", ["Glass Animals"], "", "", "other"),
-    ("", ["단비"], "", "", "other"),
+    ("", ["단비"], "", "", "ko"),                             # Hangul
+    ("사랑은 언제나", [], "", "", "ko"),
+    ("", ["Макsим"], "", "", "ru"),                           # Cyrillic
+    ("За тебя", [], "", "", "ru"),
     ("曲名", [], "アルバム名", "", "ja"),                     # album can carry the kana
 ])
 def test_guess_language(title, artists, album, lyrics, expected):
     assert guess_language(title, artists, album, lyrics) == expected
+
+
+def test_guess_language_covers_every_declared_code():
+    """LANGUAGES is the list a UI builds its folder fields from; keep it honest."""
+    from ncmdump.tags import LANGUAGES
+
+    produced = {
+        guess_language("いつか", [], "", ""),
+        guess_language("晴天", [], "", ""),
+        guess_language("", ["단비"], "", ""),
+        guess_language("", ["Макsим"], "", ""),
+        guess_language("plain english", [], "", ""),
+    }
+    assert produced == set(LANGUAGES)
+
+
+def test_artist_folder_uses_the_first_credited_artist():
+    from ncmdump.tags import artist_folder
+
+    assert artist_folder(["Hoang", "Dia Frampton"]) == "Hoang"
+    assert artist_folder([]) == ""
+    assert artist_folder(["", "  B  "]) == "B"
+    assert len(artist_folder(["x" * 200])) <= 60
 
 
 def test_guess_language_lyrics_without_kana_stays_non_japanese():
