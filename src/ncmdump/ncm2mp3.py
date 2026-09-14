@@ -20,7 +20,10 @@ import re
 import shutil
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+
+# `concurrent.futures` pulls in threading and multiprocessing, which costs tens of
+# milliseconds to import — and the GUI never runs the CLI, it calls _convert directly. The
+# pool classes are therefore imported inside the functions that actually need them.
 
 if __package__ in (None, ""):  # 允许 `python ncmdump/ncm2mp3.py` 直接运行
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -388,6 +391,8 @@ def _make_pool(jobs: int, payload):
     and the failure surfaces while the lazy `map` is being consumed — so the fallback has
     to wrap iteration, not just construction.
     """
+    from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+
     def iter_with_fallback():
         try:
             executor = ProcessPoolExecutor(max_workers=jobs)
