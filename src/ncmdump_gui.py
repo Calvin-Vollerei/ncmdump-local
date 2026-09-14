@@ -36,15 +36,14 @@ try:
 except Exception:                     # pragma: no cover - dependency is optional
     _pws = None
 
-# The window material is fixed at build time so there is no switching UI and no unused
-# style code to ship. To ship a different material, change DEFAULT_MATERIAL (one line) or
-# set NCM_GLASS at runtime for a look-see: acrylic | mica | aero | solid.
-DEFAULT_MATERIAL = "acrylic"
+# The window material is fixed at build time: a single material, so there is no switching
+# UI and no unused style code to ship. To ship a different one, change DEFAULT_MATERIAL
+# (one line) or set NCM_GLASS at runtime for a look-see:
+# acrylic | mica | aero | solid.
+DEFAULT_MATERIAL = "aero"
 WINDOW_MATERIALS = ("acrylic", "mica", "aero", "solid")
 # alpha of the tint painted over the OS material: lower = more transparent
 GLASS_TINT_ALPHA = 46
-MATERIAL_LABELS = {"acrylic": "Acrylic", "mica": "Mica", "aero": "Aero",
-                   "solid": "纯色", "none": "无材质"}
 
 
 def apply_window_style(window, mode: str) -> str:
@@ -300,11 +299,6 @@ QWidget { color: #eaf0ff; font-family: "Microsoft YaHei UI", "Segoe UI", sans-se
 #appheader { background: transparent; }
 #title { font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }
 #subtitle { color: rgba(232, 240, 255, 225); font-size: 11px; }
-#glassTag {
-    color: rgba(200, 238, 255, 235); font-size: 10px;
-    background: rgba(120, 200, 255, 52); border: none;
-    border-radius: 7px; padding: 3px 8px;
-}
 #drop {
     background: rgba(255, 255, 255, 40);
     border: none;
@@ -592,10 +586,6 @@ class MainWindow(QWidget):
         bar.addWidget(dot)
         bar.addLayout(title_box)
         bar.addStretch(1)
-        self.lbl_glass = QLabel("Acrylic")
-        self.lbl_glass.setObjectName("glassTag")
-        self.lbl_glass.setToolTip("窗口材质（构建时固定，不在界面上切换）")
-        bar.addWidget(self.lbl_glass)
         outer.addWidget(self.header)
 
         # ---- drop zone
@@ -737,19 +727,12 @@ class MainWindow(QWidget):
         # The OS does the blurring, so keep the tint very thin: a heavier fill would hide
         # exactly the effect we asked the system for. Raised transparency on request.
         self.backdrop.set_tint(QColor(8, 12, 22, GLASS_TINT_ALPHA if self._glass_on else 255))
-        self._sync_glass_ui()
-        _boot_log("window: material=%s hwnd=%d native_frame=True" % (self._material, hwnd))
-
-    def _sync_glass_ui(self):
-        """Reflect the material state in the card styling and the header badge."""
-        on = self._glass_on
-        self.card.setProperty("solid", "false" if on else "true")
+        # The card style differs between glass and solid, so it has to be re-polished —
+        # this is the only "UI" state the material has now that the badge is gone.
+        self.card.setProperty("solid", "false" if self._glass_on else "true")
         self.card.style().unpolish(self.card)
         self.card.style().polish(self.card)
-        self.lbl_glass.setText(MATERIAL_LABELS.get(self._material, self._material))
-        self.lbl_glass.setToolTip(
-            "窗口材质：%s，由 pywinstyles 驱动 Windows 合成器。\n"
-            "材质在构建时固定（DEFAULT_MATERIAL），不在界面上切换。" % self.lbl_glass.text())
+        _boot_log("window: material=%s hwnd=%d native_frame=True" % (self._material, hwnd))
 
     # ---------------------------------------------------------------- helpers
     def _toggle_organize(self, on: bool):
@@ -1103,6 +1086,7 @@ def main(argv=None) -> int:
             "organize on     = %s" % window.ed_ja.isEnabled(),
             "drop accepts    = %s" % window.drop.acceptDrops(),
             "native frame    = %s" % bool(window.windowFlags() & Qt.WindowTitleHint),
+            "material        = %s" % window._material,
             "pywinstyles     = %s" % (getattr(_pws, "__version__", "missing")
                                       if _pws is not None else "missing"),
             "icon ok         = %s" % (not window.windowIcon().isNull()),
