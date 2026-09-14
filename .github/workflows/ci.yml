@@ -57,23 +57,49 @@ jobs:
           import sys, importlib.util
           print('site disabled:', not sys.flags.no_site)
           assert importlib.util.find_spec('numpy') is None, 'numpy leaked into the stdlib-only environment'
-          import ncmdump, ncmdump.ncm_core, ncmdump.tags, ncmdump.ncm2mp3, ncmdump.aes_lite
+          import ncmdump, ncmdump.ncm_core, ncmdump.tags, ncmdump.ncm2mp3, ncmdump.aes_lite, ncmdump.metadata
           import ast, pathlib
-          allowed = {
-              'argparse','base64','concurrent','dataclasses','glob','json','os','re','shutil',
-              'ssl','struct','sys','tempfile','time','typing','urllib','__future__','numpy',
-          }
+
+          # Judge against the real stdlib list instead of a hand-kept whitelist: a
+          # whitelist silently goes stale as soon as a new stdlib import is added, and the
+          # check then fails on a change that is perfectly fine (that is exactly what
+          # happened with 'threading').
+          stdlib = set(getattr(sys, 'stdlib_module_names', ()))
+          if not stdlib:
+              raise SystemExit('need Python 3.10+ for sys.stdlib_module_names')
+          allowed = stdlib | {'ncmdump'}
+
+          # The one declared optional accelerator. It is only ever imported inside a
+          # function, so the import above still succeeded without it - that deferral is
+          # what makes it acceptable, and is enforced below.
+          OPTIONAL = {'numpy'}
+
+          def roots_of(node):
+              if isinstance(node, ast.Import):
+                  return [a.name.split('.')[0] for a in node.names]
+              if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                  return [node.module.split('.')[0]]
+              return []
+
           for path in sorted(pathlib.Path('src/ncmdump').glob('*.py')):
               tree = ast.parse(path.read_text(encoding='utf-8'))
+              # imports at module scope must be stdlib only
+              for node in tree.body:
+                  for root in roots_of(node):
+                      assert root in allowed, (
+                          f'{path.name}: module-level import {root!r} is not in the standard library')
+              # an optional dependency may appear, but only deferred inside a function
               for node in ast.walk(tree):
-                  roots = []
-                  if isinstance(node, ast.Import):
-                      roots = [a.name.split('.')[0] for a in node.names]
-                  elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                      roots = [node.module.split('.')[0]]
-                  for root in roots:
-                      assert root in allowed, f'{path.name}: unexpected import {root!r}'
-          print('stdlib-only import check: OK')
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                      for sub in ast.walk(node):
+                          for root in roots_of(sub):
+                              if root in allowed:
+                                  continue
+                              assert root in OPTIONAL, (
+                                  f'{path.name}: {root!r} is neither stdlib nor a declared '
+                                  f'optional dependency')
+          print('stdlib-only import check: OK (module-level imports are stdlib only;',
+                'optional:', ','.join(sorted(OPTIONAL)), ')')
           "
       - name: Convert a synthetic container with site-packages disabled
         env:
