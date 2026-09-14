@@ -16,11 +16,29 @@ ARTEFACT = re.compile(r"\.(pyc|pyo|whl|exe|dll|pyd|log)$", re.I)
 SECRET = re.compile(
     r"(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,})")
-# Windows user paths and unix home directories baked into source
-MACHINE_PATH = re.compile(r"([A-Za-z]:[\\/]+Users[\\/]+[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/)")
+# Windows user paths and unix home directories baked into source. Both separators are
+# matched: a path typed with forward slashes ("C:/Users/...") leaks exactly as badly as the
+# backslash form, and a checker that only knows about "\" gives false confidence.
+MACHINE_PATH = re.compile(
+    r"([A-Za-z]:[\\/]+(?:Users|Documents and Settings)[\\/]+[A-Za-z0-9._-]+"
+    r"|/home/[A-Za-z0-9._-]+/|/Users/[A-Za-z0-9._-]+/|/root/)")
 TEXT_EXT = {".py", ".md", ".toml", ".yml", ".yaml", ".cfg", ".txt", ".spec", ".bat", ".sh", ""}
 # documentation is allowed to *mention* example paths, source code is not
 PATH_EXEMPT = re.compile(r"(AUDIT-.*\.md|README\.md|NOTICE\.md|SECURITY\.md)$")
+# ...but an exempt report must never be *tracked*: that would publish the very leak it
+# documents. The audit reports live outside the repository on purpose.
+REPORT_EXEMPT = re.compile(r"AUDIT[-_].*\.md$", re.I)
+
+
+def tracked_files():
+    """Paths git tracks, or None when this is not a git checkout."""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "-C", ROOT, "ls-files"], check=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return [line for line in out.stdout.decode("utf-8", "replace").splitlines() if line]
 
 problems = []
 
@@ -35,6 +53,9 @@ def walk():
 
 
 FILES = walk()
+# The guard necessarily contains the very patterns it hunts for, so it is the one source
+# file excluded from the content scan (registered in SELF).
+SELF = os.path.relpath(os.path.abspath(__file__), ROOT).replace("\\", "/")
 for path in FILES:
     rel = os.path.relpath(path, ROOT).replace("\\", "/")
     if MEDIA.search(name := os.path.basename(path)):
@@ -43,6 +64,8 @@ for path in FILES:
         problems.append("build artefact or log: %s" % rel)
     if name in (".env", "id_rsa") or name.endswith((".pem", ".key", ".p12", ".pfx")):
         problems.append("credential file: %s" % rel)
+    if rel == SELF:
+        continue
     ext = os.path.splitext(name)[1].lower()
     if ext in TEXT_EXT and not PATH_EXEMPT.search(rel):
         try:
@@ -55,6 +78,19 @@ for path in FILES:
             problems.append("machine path in %s: %s" % (rel, match.group(0)))
 
 print("scanned:", len(FILES), "files")
+
+# An audit report quotes machine paths as evidence, so it is exempt from the path scan —
+# which makes it the one document that must never be committed. `git add -f` and a
+# repository built from a copy are the two ways it sneaks in, so ask git directly.
+tracked = tracked_files()
+if tracked is None:
+    print("note: not a git checkout, skipping the tracked-file check")
+else:
+    for rel in tracked:
+        if REPORT_EXEMPT.search(rel):
+            problems.append("an audit report is tracked by git (it quotes machine paths): %s" % rel)
+        if rel.startswith("ncm-work/"):
+            problems.append("a development-only path is tracked by git: %s" % rel)
 
 # Stale copies of this project living NEXT TO the repository are a real hazard: they were
 # the pre-refactor version (with a machine-specific default path) and copying one back
@@ -78,7 +114,9 @@ def check_stale_neighbours():
                         text = fh.read()
                 except OSError:
                     continue
-                why = "still hard-codes a machine path" if "W:\\Music" in text else "duplicate copy"
+                baked = MACHINE_PATH.search(text)
+                why = ("still hard-codes a machine path: %s" % baked.group(0)
+                       if baked else "duplicate copy")
                 warnings.append("%s (%s)" % (path, why))
     return warnings
 
