@@ -56,18 +56,36 @@ for path in FILES:
 
 print("scanned:", len(FILES), "files")
 
-# A stale, older copy of the GUI can live next to the repo (it was the pre-refactor
-# version and still contains a machine-specific default output path). Copying it back
-# would reintroduce the leak, so warn about it — this is the one check that looks outside
-# the repository on purpose.
-stale = os.path.join(os.path.dirname(ROOT), "ncm_gui.py")
-if os.path.isfile(stale):
-    try:
-        if "W:\\Music" in open(stale, encoding="utf-8", errors="ignore").read():
-            print("\nWARNING: %s is a stale copy that still hard-codes a machine path." % stale)
-            print("         Do not copy it over src/ncmdump_gui.py; delete it instead.")
-    except OSError:
-        pass
+# Stale copies of this project living NEXT TO the repository are a real hazard: they were
+# the pre-refactor version (with a machine-specific default path) and copying one back
+# would reintroduce the leak — or silently shadow the current package on sys.path. This is
+# the one check that deliberately looks outside the repository.
+def check_stale_neighbours():
+    parent = os.path.dirname(ROOT)
+    ours = {}
+    for base, _dirs, names in os.walk(os.path.join(ROOT, "src")):
+        for name in names:
+            if name.endswith((".py", ".spec")):
+                ours.setdefault(name, os.path.join(base, name))
+    warnings = []
+    for base, dirs, names in os.walk(parent):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not os.path.abspath(os.path.join(base, d)).startswith(ROOT)]
+        for name in names:
+            if name in ours:
+                path = os.path.join(base, name)
+                try:
+                    with open(path, encoding="utf-8", errors="ignore") as fh:
+                        text = fh.read()
+                except OSError:
+                    continue
+                why = "still hard-codes a machine path" if "W:\\Music" in text else "duplicate copy"
+                warnings.append("%s (%s)" % (path, why))
+    return warnings
+
+
+for warning in check_stale_neighbours():
+    print("\nWARNING: stale neighbour copy outside the repo: %s" % warning)
+    print("         Do not copy it back over src/; delete it instead.")
 
 if problems:
     print("\nPROBLEMS (%d):" % len(problems))
