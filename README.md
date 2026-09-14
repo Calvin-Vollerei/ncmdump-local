@@ -40,25 +40,51 @@ python -c "import sys; sys.path.insert(0,'src'); from ncmdump.ncm2mp3 import mai
 
 ## 命令行用法
 
+### 输出目录怎么分（4 种方式）
+
 ```bash
-# 转换目录里全部 .ncm（默认保留原文件）
-ncmdump ./某目录
+# 1) 不分类，全部丢进输出目录
+ncmdump ./in -o D:/Music --organize-by none
 
-# 按语言分目录 + 8 并行 + 不写封面
-ncmdump ./某目录 -o D:/Music -j 8 --no-cover \
-  --organize "ja=VIP(Japanness),other=VIP(Other language)"
+# 2) 按语言分目录，语言 -> 文件夹名完全自定义
+ncmdump ./in -o D:/Music \
+  --organize "ja=J-Pop,zh=中文,ko=K-Pop,ru=Русский,other=其他"
 
-# 只看元数据 / 预览落点，都不转换
-ncmdump ./某目录 --meta
-ncmdump ./某目录 --plan -o D:/Music --organize "ja=A,other=B"
+# 3) 按歌手分目录
+ncmdump ./in -o D:/Music --organize-by artist
+
+# 4) 语言 + 歌手 两级：D:/Music/J-Pop/宇多田ヒカル/…
+ncmdump ./in -o D:/Music \
+  --organize "ja=J-Pop,zh=中文,ko=K-Pop,ru=Русский,other=其他" --artist-folders
 ```
+
+`--plan` 可以先看落点再决定（不转换，且用**真实路由逻辑**计算，不会与实际结果不一致）：
+
+```bash
+ncmdump ./in -o D:/Music --organize "ja=J-Pop,other=其他" --plan
+```
+
+识别的语种与代号（`--organize` 的键）：
+
+| 代号 | 判据 | 界面默认文件夹名 |
+| --- | --- | --- |
+| `ja` | 含假名（元数据或歌词） | 日文 |
+| `zh` | 含汉字且无假名 | 中文 |
+| `ko` | 含谚文 | 韩文 |
+| `ru` | 含西里尔字母 | 俄文 |
+| `other` | 其余（英法等拉丁字母无法区分） | 其他 |
+
+> 纯汉字标题（如 `万華鏡`）单看字形与中文无从区分，因此归到 `zh`；
+> 只有歌词里出现假名时才会判为 `ja`。文件夹名会被自动清洗（去掉 `\ / : * ? " < > |`）。
 
 | 参数 | 说明 |
 | --- | --- |
 | `paths` | 文件、目录或通配符；默认当前目录（递归） |
 | `-o, --out` | 输出目录，默认与源文件同目录 |
 | `-j, --jobs` | 并行数，默认 min(CPU 核数, 8) |
-| `--organize MAP` | 按语言分目录，如 `ja=J,other=O` |
+| `--organize MAP` | `语言代号=文件夹名`，逗号分隔；未列出的语种落到 `other` |
+| `--organize-by` | `language`（默认）/ `artist` / `none` |
+| `--artist-folders` | 语言目录下再按歌手分一层 |
 | `--plan` | 预览每首歌落点 |
 | `--keep` | 保留 `.ncm`（**默认转换成功后删除**） |
 | `--no-verify` | 删除前跳过逐字节校验（更快，不推荐） |
@@ -80,6 +106,14 @@ python src/ncmdump_gui.py
 ```
 
 把 `.ncm` 文件或文件夹拖进去 → 选输出目录（**留空则输出到源文件所在目录**）→ 开始转换。
+
+**目录整理**（界面里可全部自定义）：
+
+| 界面控件 | 作用 |
+| --- | --- |
+| 「整理方式」下拉框 | 不分类 / 按语言 / 按歌手 / 按语言 + 歌手（两级） |
+| 语言文件夹名输入框 | 每个语种一个输入框（`zh` `ja` `ko` `ru` `other`），**名字随你改**：`中文`、`J-Pop`、`VIP(Japanness)` 都行 |
+| 「预览落点」按钮 | 不转换，先列出每首歌会落到哪个文件夹、各多少首 |
 
 * 使用**系统默认窗口**：标题栏、边框拉伸、Aero Snap、双击最大化、Alt+Space 全部由 Windows 提供
 * 窗口材质通过 [pywinstyles](https://github.com/Akascape/py-window-styles) 驱动，**构建时固定为 Aero**

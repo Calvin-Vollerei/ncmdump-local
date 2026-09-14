@@ -19,7 +19,10 @@ try:  # Python 3.9+
 except ImportError:  # pragma: no cover
     TypedDict = dict  # type: ignore
 
-__all__ = ["TagInfo", "write_tags", "read_flac_tags", "guess_language"]
+__all__ = ["TagInfo", "write_tags", "read_flac_tags", "guess_language", "artist_folder"]
+
+# Language codes guess_language can return, in the order a UI should present them.
+LANGUAGES = ("zh", "ja", "ko", "ru", "other")
 
 # FLAC block types
 _FLAC_STREAMINFO = 0
@@ -101,7 +104,11 @@ def write_tags(path: str, fmt: str, tag: TagInfo) -> str:
 
 def guess_language(title: str, artists: Optional[Sequence[str]] = None,
                    album: str = "", lyrics: str = "") -> str:
-    """Rough language guess: ``"ja"``, ``"zh"`` or ``"other"``.
+    """Rough script-based language guess.
+
+    Returns one of ``"ja"``, ``"zh"``, ``"ko"``, ``"ru"`` or ``"other"``. Only the script
+    can be judged reliably; Latin-script languages (English, French, ...) all collapse into
+    ``"other"`` because nothing in the tags distinguishes them.
 
     Order matters here, and it is deliberate:
 
@@ -109,21 +116,42 @@ def guess_language(title: str, artists: Optional[Sequence[str]] = None,
     2. kana in the lyrics             -> Japanese. This comes *before* the Chinese test
        because a kanji-only title such as ``万華鏡`` is indistinguishable from Chinese by
        script alone, while Japanese lyrics reliably contain kana;
-    3. any other CJK in the metadata  -> Chinese;
-    4. otherwise                      -> other.
+    3. Hangul                         -> Korean;
+    4. Cyrillic                       -> Russian;
+    5. any other CJK in the metadata  -> Chinese;
+    6. otherwise                      -> other.
     """
     import re
 
     kana = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")
+    hangul = re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]")
+    cyrillic = re.compile(r"[\u0400-\u04ff]")
     cjk = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
     texts = [title or "", album or ""] + list(artists or [])
     if any(kana.search(t) for t in texts):
         return "ja"
     if lyrics and kana.search(lyrics):
         return "ja"
+    if any(hangul.search(t) for t in texts):
+        return "ko"
+    if any(cyrillic.search(t) for t in texts):
+        return "ru"
     if any(cjk.search(t) for t in texts):
         return "zh"
     return "other"
+
+
+def artist_folder(artists: Optional[Sequence[str]], limit: int = 60) -> str:
+    """Folder name for a track's artist(s): the first artist, trimmed.
+
+    Multi-artist tracks go under the first credited artist — the alternative (one folder
+    per combination) produces names nobody looks for.
+    """
+    for name in artists or []:
+        cleaned = (name or "").strip()
+        if cleaned:
+            return cleaned[:limit]
+    return ""
 
 
 # ---------------------------------------------------------------- FLAC -------

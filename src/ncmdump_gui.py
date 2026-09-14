@@ -248,6 +248,7 @@ from PySide6.QtGui import (  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -299,6 +300,17 @@ QWidget { color: #eaf0ff; font-family: "Microsoft YaHei UI", "Segoe UI", sans-se
 #appheader { background: transparent; }
 #title { font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }
 #subtitle { color: rgba(232, 240, 255, 225); font-size: 11px; }
+#langTag { color: rgba(190, 222, 255, 215); font-size: 10px; letter-spacing: 0.5px; }
+QComboBox {
+    background: rgba(255, 255, 255, 44); border: none; border-radius: 9px;
+    padding: 7px 11px; color: #eef3ff;
+}
+QComboBox:hover { background: rgba(255, 255, 255, 62); }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView {
+    background: #1b2130; border: none; selection-background-color: rgba(120, 180, 255, 120);
+    color: #eef3ff; outline: none;
+}
 #drop {
     background: rgba(255, 255, 255, 40);
     border: none;
@@ -497,10 +509,12 @@ class GlassBackdrop(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        from ncmdump.ncm2mp3 import find_inputs, load_lyrics, split_lrc, sanitize, human  # noqa
+        from ncmdump.ncm2mp3 import find_inputs, human, sanitize
+        from ncmdump.tags import LANGUAGES
         self._sanitize = sanitize
         self._human = human
         self._find_inputs = find_inputs
+        self._languages = LANGUAGES
 
         # Native window frame on purpose: keep the OS title bar, resizable borders and all
         # the shell behaviour that comes with them (snap, maximise, system menu).
@@ -608,20 +622,52 @@ class MainWindow(QWidget):
         row.addWidget(self.btn_out)
         outer.addLayout(row)
 
-        # ---- organize row
-        org = QHBoxLayout()
-        org.setSpacing(8)
-        self.chk_organize = QCheckBox("按语言分目录")
-        self.chk_organize.setChecked(True)
-        self.chk_organize.toggled.connect(self._toggle_organize)
-        self.ed_ja = QLineEdit("VIP(Japanness)")
-        self.ed_other = QLineEdit("VIP(Other language)")
-        org.addWidget(self.chk_organize)
-        org.addWidget(QLabel("日文 →"))
-        org.addWidget(self.ed_ja, 1)
-        org.addWidget(QLabel("其他 →"))
-        org.addWidget(self.ed_other, 1)
-        outer.addLayout(org)
+        # ---- organize: mode + per-language folder names (all editable)
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        mode_label = QLabel("整理方式")
+        mode_label.setObjectName("sectionTitle")
+        self.cmb_organize = QComboBox()
+        self.cmb_organize.addItems([
+            "不分类（全部放输出目录）",
+            "按语言分目录",
+            "按歌手分目录",
+            "按语言 + 歌手（两级）",
+        ])
+        self.cmb_organize.setCurrentIndex(1)
+        self.cmb_organize.currentIndexChanged.connect(self._on_organize_changed)
+        self.btn_plan = QPushButton("预览落点")
+        self.btn_plan.setObjectName("ghost")
+        self.btn_plan.setToolTip("不转换，只列出每首歌会落到哪个文件夹")
+        self.btn_plan.clicked.connect(self.preview_layout)
+        mode_row.addWidget(mode_label)
+        mode_row.addWidget(self.cmb_organize, 1)
+        mode_row.addWidget(self.btn_plan)
+        outer.addLayout(mode_row)
+
+        # one editable field per language; the label shows the detected code
+        self.lang_fields = {}
+        lang_row = QHBoxLayout()
+        lang_row.setSpacing(6)
+        self.lbl_lang_hint = QLabel("目录名")
+        self.lbl_lang_hint.setObjectName("sectionTitle")
+        lang_row.addWidget(self.lbl_lang_hint)
+        defaults = {"zh": "中文", "ja": "日文", "ko": "韩文", "ru": "俄文", "other": "其他"}
+        titles = {"zh": "中文", "ja": "日文（含假名）", "ko": "韩文", "ru": "俄文（西里尔）",
+                  "other": "其他（英法等拉丁字母）"}
+        for code in self._languages:
+            box = QVBoxLayout()
+            box.setSpacing(2)
+            tag = QLabel(code)
+            tag.setObjectName("langTag")
+            edit = QLineEdit(defaults.get(code, code))
+            edit.setToolTip("检测为「%s」的歌曲放进哪个文件夹（可改）" % titles.get(code, code))
+            edit.setMinimumWidth(90)
+            box.addWidget(tag)
+            box.addWidget(edit)
+            self.lang_fields[code] = edit
+            lang_row.addLayout(box, 1)
+        outer.addLayout(lang_row)
 
         # ---- options
         opts = QHBoxLayout()
@@ -691,7 +737,7 @@ class MainWindow(QWidget):
         self.log_scroll = scroll
         outer.addWidget(scroll, 1)
 
-        self._toggle_organize(True)
+        self._on_organize_changed(self.cmb_organize.currentIndex())
 
     # ----------------------------------------------------------- window chrome
     def showEvent(self, event):
@@ -735,9 +781,61 @@ class MainWindow(QWidget):
         _boot_log("window: material=%s hwnd=%d native_frame=True" % (self._material, hwnd))
 
     # ---------------------------------------------------------------- helpers
-    def _toggle_organize(self, on: bool):
-        self.ed_ja.setEnabled(on)
-        self.ed_other.setEnabled(on)
+    def organize_settings(self):
+        """Translate the controls into (lang_map, organize, mode) for the converter.
+
+        The language fields stay editable even in artist mode — they are simply unused —
+        so switching modes never loses what the user typed.
+        """
+        index = self.cmb_organize.currentIndex()          # 0 none, 1 language, 2 artist, 3 both
+        if index == 0:
+            return None, False, "none"
+        mapping = {"__mode__": "language" if index in (1, 3) else "artist",
+                   "__artist__": index == 3}
+        for code, field in self.lang_fields.items():
+            name = field.text().strip()
+            if name:
+                mapping[code] = name
+        if index in (1, 3) and not mapping.get("other"):
+            return None, False, "invalid"                # "other" folder name is required
+        return mapping, True, "ok"
+
+    def _on_organize_changed(self, index: int):
+        uses_language = index in (1, 3)
+        for field in self.lang_fields.values():
+            field.setEnabled(uses_language)
+        self.lbl_lang_hint.setEnabled(uses_language)
+
+    def preview_layout(self):
+        """Show where each queued track would land, without converting anything."""
+        if not self.files:
+            self._append_log("请先拖入或选择 .ncm 文件")
+            return
+        mapping, organize, state = self.organize_settings()
+        if state == "invalid":
+            self._append_log("「其他」目录名不能为空")
+            return
+        from ncmdump.ncm2mp3 import _organize_options, _target_dir
+        from ncmdump.ncm_core import decrypt_file
+
+        mode, artist, folders = _organize_options(mapping if organize else None)
+        out_dir = self.ed_out.text().strip()
+        buckets = {}
+        for path in self.files:
+            try:
+                parsed = decrypt_file(path, read_audio=False)
+                target = _target_dir(path, out_dir, parsed, folders, organize, mode, artist)
+            except Exception as exc:
+                target = "（读取失败：%s）" % exc
+            buckets.setdefault(target or "（源目录）", 0)
+            buckets[target or "（源目录）"] += 1
+        base = os.path.abspath(out_dir) if out_dir else ""
+        self._append_log("落点预览（共 %d 首）：" % len(self.files))
+        for target, count in sorted(buckets.items()):
+            shown = target
+            if base and os.path.abspath(target).startswith(base):
+                shown = os.path.relpath(target, base)
+            self._append_log("    %-34s %d 首" % (shown, count))
 
     def pick_output(self):
         current = self.ed_out.text().strip()
@@ -802,17 +900,21 @@ class MainWindow(QWidget):
         cutoff = time.time() - 3600
         roots = {os.path.dirname(os.path.abspath(p)) for p in self.files if os.path.isfile(p)}
         if out_dir:
+            # the tree can now be two levels deep (language/artist), so walk the whole
+            # output tree rather than guessing the sub-folder names
             roots.add(os.path.abspath(out_dir))
-            if self.chk_organize.isChecked():
-                for sub in (self.ed_ja.text().strip(), self.ed_other.text().strip()):
-                    if sub:
-                        roots.add(os.path.join(os.path.abspath(out_dir), sub))
-        for root in roots:
-            try:
-                for name in os.listdir(root):
+        seen = set()
+        for root in list(roots):
+            if not os.path.isdir(root):
+                continue
+            for base, _dirs, names in os.walk(root):
+                if base in seen:
+                    continue
+                seen.add(base)
+                for name in names:
                     if not (name.startswith(".") and name.endswith(".ncmtmp")):
                         continue
-                    path = os.path.join(root, name)
+                    path = os.path.join(base, name)
                     try:
                         if os.path.getmtime(path) > cutoff:
                             continue          # possibly a running conversion
@@ -820,8 +922,6 @@ class MainWindow(QWidget):
                         removed += 1
                     except OSError:
                         pass
-            except OSError:
-                continue
         return removed
 
     def start(self):
@@ -842,13 +942,10 @@ class MainWindow(QWidget):
         if stale:
             self._append_log("清理了 %d 个上次中断残留的临时文件" % stale)
 
-        lang_map = None
-        if self.chk_organize.isChecked():
-            lang_map = {"ja": self.ed_ja.text().strip() or "ja",
-                        "other": self.ed_other.text().strip() or "other"}
-            if not lang_map["other"]:
-                self._append_log("“其他”目录名不能为空")
-                return
+        lang_map, organize, state = self.organize_settings()
+        if state == "invalid":
+            self._append_log("「其他」目录名不能为空（其他语种会没有去处）")
+            return
 
         self.total = len(self.files)
         self.done = self.ok = self.failed = self.bytes_done = 0
@@ -859,7 +956,8 @@ class MainWindow(QWidget):
         self.btn_cancel.setEnabled(True)
         self.drop.setEnabled(False)
         self.log.setText("")
-        self._append_log("开始转换 %d 个文件 → %s" % (self.total, out_dir))
+        self._append_log("开始转换 %d 个文件（%s）→ %s" % (
+            self.total, self.cmb_organize.currentText(), out_dir or "源文件所在目录"))
 
         keep = self.chk_keep.isChecked()
         want_lyrics = self.chk_lyrics.isChecked()
@@ -871,12 +969,13 @@ class MainWindow(QWidget):
         thread = threading.Thread(
             target=self._worker,
             args=(list(self.files), out_dir, keep, want_cover, want_lyrics, verify,
-                  lang_map, jobs),
+                  lang_map, organize, jobs),
             daemon=True,
         )
         thread.start()
 
-    def _worker(self, files, out_dir, keep, want_cover, want_lyrics, verify, lang_map, jobs):
+    def _worker(self, files, out_dir, keep, want_cover, want_lyrics, verify,
+                lang_map, organize, jobs):
         from ncmdump.ncm2mp3 import _convert
 
         def run_one(src):
@@ -888,7 +987,7 @@ class MainWindow(QWidget):
                 self.queue.put(("stage", {"name": name, "stage": stage, "fraction": fraction}))
 
             return _convert(src, out_dir, keep, want_cover, want_lyrics, False,
-                            lang_map, bool(lang_map), verify, progress)
+                            lang_map, organize, verify, progress)
 
         try:
             with ThreadPoolExecutor(max_workers=jobs) as pool:
@@ -1083,7 +1182,7 @@ def main(argv=None) -> int:
             "numpy available = %s" % (_numpy() is not None),
             "keystream ok    = %s" % (xor_keystream(b"\x00\x01\x02\x03", bytes(256)) == b"\x00\x01\x02\x03"),
             "widgets         = %d" % sum(1 for _ in window.findChildren(QWidget)),
-            "organize on     = %s" % window.ed_ja.isEnabled(),
+            "organize mode   = %s" % window.cmb_organize.currentText(),
             "drop accepts    = %s" % window.drop.acceptDrops(),
             "native frame    = %s" % bool(window.windowFlags() & Qt.WindowTitleHint),
             "material        = %s" % window._material,
