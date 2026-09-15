@@ -29,6 +29,13 @@
 | 删除原文件前逐字节校验 | Byte-for-byte verification before deleting a source |
 | 磨砂玻璃界面、原生窗口、检查更新 | Frosted glass, native window, update check |
 
+> 做界面的同学请先看 **[docs/GLASS-TROUBLESHOOTING.md](docs/GLASS-TROUBLESHOOTING.md)**：
+> 为什么"代码开了透明却不透明"、为什么 `grab()` 的截图**不能**用来判断毛玻璃是否生效
+> （附像素级证据与合成验算），以及 6 个具体踩坑与排查清单。
+>
+> If you touch the window material, read that doc first — it explains why a self-grab lies
+> about transparency, with the pixel maths to prove it.
+
 ---
 
 ## 安装
