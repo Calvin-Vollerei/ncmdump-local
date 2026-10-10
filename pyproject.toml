@@ -103,5 +103,6 @@ ignore = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-# let the tests import both the package and the fixture builder without installing
-pythonpath = ["src", "tests"]
+# let the tests import the package, the fixture builder and the shared guard
+# (scripts/stdlib_guard.py, the one definition of the stdlib-only rule) without installing
+pythonpath = ["src", "tests", "scripts"]
