@@ -18,7 +18,7 @@ __all__ = [
 
 APP_NAME = "NCM 本地转换器"
 DEVELOPER = "Calvin Vollerei Studio"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 # Where releases live. Set these once the repository exists; the update check simply
 # reports "not available" until then, so nothing breaks before the first push.
