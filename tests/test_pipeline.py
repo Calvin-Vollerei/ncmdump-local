@@ -133,6 +133,34 @@ def test_failed_tagging_leaves_no_output(tmp_path, monkeypatch):
     assert produced == [], "a failed conversion left %s behind" % produced
 
 
+def test_variant_layout_converts_end_to_end(tmp_path):
+    """The layout from issue #2 must go all the way through the pipeline, not just parse."""
+    src = tmp_path / "variant.ncm"
+    B.write(str(src), B.fake_flac(b"payload" * 50),
+            cover=b"cover-bytes", pad_after_cover=b"\x00\x00\x00\x00")
+    out = tmp_path / "out"
+    result = _convert(str(src), str(out), True, False, False, False, None, False, True)
+    assert result["ok"], result["error"]
+    assert result["fmt"] == "flac"
+    assert os.path.getsize(result["out"]) > 0
+
+
+def test_unrecognized_output_fails_and_keeps_the_source(tmp_path):
+    """A payload we cannot name must not be published as `.bin` (issue #2, second half).
+
+    Publishing it would also make the byte-for-byte check pass, and that check is what
+    gates deletion of the source — so a failed conversion would quietly eat the `.ncm`.
+    """
+    src = tmp_path / "mystery.ncm"
+    B.write(str(src), b"NOT-AUDIO" * 200)      # decrypts cleanly, no known signature
+    out = tmp_path / "out"
+    result = _convert(str(src), str(out), False, False, False, False, None, False, True)
+    assert not result["ok"]
+    assert "无法识别" in result["error"]
+    assert src.exists(), "a conversion with no recognizable audio must not delete the source"
+    assert not out.exists() or os.listdir(out) == [], "a failed conversion left files behind"
+
+
 def test_successful_conversion_publishes_a_tagged_file(tmp_path):
     src = tmp_path / "in"
     out = tmp_path / "out"

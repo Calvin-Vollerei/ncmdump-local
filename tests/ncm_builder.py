@@ -10,6 +10,11 @@ Layout, matching what the reference implementation reads (see ncm_core._parse_he
     "CTENFDAM" | 2 pad | u32 key_len | key blob
     u32 meta_len | metadata blob
     "00 00 00 00" | 0x01 | u32 cover_len | cover bytes | audio
+
+That is the layout the verified files use, where cover_len already includes the four-byte
+floor. `pad_after_cover` adds bytes that the length field does *not* count, which is the
+other layout found in the wild (issue #2): there the audio starts four bytes later than
+cover_len suggests. Both must parse.
 """
 from __future__ import annotations
 
@@ -114,7 +119,8 @@ def fake_flac(payload: bytes = b"audio-bytes-here") -> bytes:
 
 def build(audio: bytes, title: str = "Test Song", artists=("Artist A",),
           album: str = "Album", cover: bytes = b"", keydata: bytes = KEYDATA,
-          fmt: str = "flac", prefix: str = "music") -> bytes:
+          fmt: str = "flac", prefix: str = "music",
+          pad_after_cover: bytes = b"") -> bytes:
     """Assemble a complete container around `audio`."""
     key_plain = b"neteasecloudmusic" + keydata
     key_blob = _aes_ecb_encrypt(CORE_KEY, key_plain)
@@ -144,6 +150,9 @@ def build(audio: bytes, title: str = "Test Song", artists=("Artist A",),
     out += struct.pack("<I", len(meta_enc)) + meta_enc
     out += b"\x00\x00\x00\x00" + b"\x01"
     out += struct.pack("<I", len(block)) + block
+    # bytes the length field does not count; empty for the layout this project has always
+    # built, four NULs for the variant that starts the audio four bytes later
+    out += pad_after_cover
     out += audio_enc
     return bytes(out)
 

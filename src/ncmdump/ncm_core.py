@@ -15,7 +15,9 @@ Container layout (little-endian):
                                plaintext: b"music:{json}" or b"dj:{json}"
      ..   4   crc32
      ..   5   padding
-     ..   4   audio_len
+     ..   4   cover block length
+     ..   c   cover art (padded to a 4-byte floor when there is no cover)
+               real files disagree about the four bytes after the cover; see _audio_start_of
      ..   a   encrypted audio (every byte ^= keybox[i & 0xff])
 """
 from __future__ import annotations
@@ -203,13 +205,12 @@ def _parse_header(fh) -> _Parsed:
     #   offset + 0 .. + 4    four zero bytes
     #   offset + 4           0x01
     #   offset + 5 .. + 9    cover-art block length
-    #   offset + 9 ..        exactly that many bytes of cover art (padded to a 4-byte
-    #                        floor when the file carries no cover)
-    #   audio start          = offset + 9 + max(cover_len, 4)
-    # The site expresses it as `offset += getUint32(offset + 5) + 13`, i.e. 9 bytes for the
-    # fields it already consumed plus the 4-byte pad its own reader re-reads. Skipping
-    # `cover_len + 13` instead is off by four bytes on cover-less files and de-syncs the
-    # keystream: the result still looks like a FLAC, but every sample byte is shifted.
+    #   audio start          = offset + 9 + one of the two rules in _audio_start_of
+    # The site expresses its own rule as `offset += getUint32(offset + 5) + 13`. Files in
+    # the wild disagree by exactly four bytes at the end of the cover region, and picking
+    # either rule unconditionally turns the other set into noise (still shaped like a FLAC,
+    # but every sample byte shifted). So the offset is chosen by decrypting the first bytes
+    # at each candidate and keeping the one that looks like audio.
     trailer = fh.read(9)
     if len(trailer) < 9:
         return _Parsed(keybox=keybox, meta=meta, truncated=True, audio_start=None,
@@ -220,16 +221,14 @@ def _parse_header(fh) -> _Parsed:
     if isinstance(meta.raw, dict):
         fmt = (meta.raw.get("format") or "").lower()
 
-    skip = max(declared, 4)
-    fh.seek(skip, 1)
-    start = fh.tell()
-    if start >= _size_of(fh):
+    start = _audio_start_of(fh, fh.tell(), declared, keybox)
+    size = _size_of(fh)
+    if start >= size:
         # The header claims a cover region that is not actually there. Fall back to
         # treating whatever follows the cover-length field as audio, and flag it: the
         # caller should not silently ship a zero-byte result.
         truncated = True
-        fh.seek(_size_of(fh))
-        start = fh.tell()
+        start = size
     return _Parsed(keybox=keybox, meta=meta, fmt=fmt, mime=_MIME.get(fmt, ""),
                    audio_len=0, cover_len=declared, audio_start=start,
                    key_len=len(key_blob), meta_len=len(meta_blob),
@@ -245,6 +244,43 @@ def _size_of(fh) -> int:
         size = fh.tell()
         fh.seek(pos)
         return size
+
+
+def _audio_start_of(fh, after_trailer: int, declared: int, keybox: bytes) -> int:
+    """Where the encrypted audio begins, decided by evidence rather than by one formula.
+
+    Two layouts exist among real files:
+
+    * ``declared`` already accounts for the four extra bytes, so the audio starts at
+      ``after_trailer + max(declared, 4)``. That is the layout of the files this project
+      was verified against byte-for-byte, and what tests/ncm_builder.py builds by default.
+    * the four bytes sit *after* the cover and the length field does not count them, so the
+      audio starts at ``after_trailer + declared + 4``. Issue #2 reports 300 files of this
+      shape, which the first rule turns into noise: it reads four bytes early and XORs the
+      whole stream at the wrong phase.
+
+    Either formula applied unconditionally breaks the other set, so try both and accept the
+    first whose decrypted head is a recognizable audio container. The probe costs 32 bytes;
+    the stream that follows is measured in megabytes.
+    """
+    for skip in dict.fromkeys((max(declared, 4), declared + 4)):
+        start = after_trailer + skip
+        if _sniff_audio_at(fh, start, keybox):
+            return start
+    return after_trailer + max(declared, 4)
+
+
+def _sniff_audio_at(fh, start: int, keybox: bytes) -> str:
+    """Format of the decrypted bytes at ``start``, or "" — without leaving ``fh`` moved."""
+    pos = fh.tell()
+    try:
+        fh.seek(start)
+        head = fh.read(32)
+    finally:
+        fh.seek(pos)
+    if len(head) < 4:
+        return ""
+    return sniff_format(xor_keystream(head, keybox, 0))
 
 
 # numpy is optional and only helps the XOR step, but importing it eagerly costs ~100 ms of

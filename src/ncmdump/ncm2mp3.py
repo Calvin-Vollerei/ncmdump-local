@@ -177,7 +177,14 @@ def _convert(src, out_dir, keep, want_cover, want_lyrics, lrc_plain,
         report("decrypt", 0.0)
         info = decrypt_to_file(src, tmp_path)
         report("decrypt", 1.0)
-        fmt = info.fmt or "bin"
+        if not info.fmt:
+            # An unrecognized payload is not "a file with an odd extension": it is bytes we
+            # cannot vouch for. Writing it out anyway would also make the byte-for-byte
+            # check below succeed and delete the source .ncm, turning a failed conversion
+            # into data loss. Fail instead, and let the source stay where it is.
+            raise NcmError(
+                "无法识别解出的音频格式（容器可能是不同变体），已保留原文件：%s" % name)
+        fmt = info.fmt
 
         cover = None
         cover_mime = ""

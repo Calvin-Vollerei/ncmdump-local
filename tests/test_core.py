@@ -44,6 +44,21 @@ def test_roundtrip_with_cover(ncm):
     assert result.cover_len == len(b"\xff\xd8\xff" + b"C" * 1234)
 
 
+@pytest.mark.parametrize("cover", [b"", b"\xff\xd8\xff" + b"C" * 1234])
+def test_unscored_pad_layout_is_detected(ncm, cover):
+    """Issue #2: some containers put four pad bytes after the cover *without counting them*.
+
+    Then the length field understates the audio offset by four, the historical
+    max(cover_len, 4) rule reads four bytes early, and the whole stream XORs at the wrong
+    phase — the result sniffs as nothing and the reporter's 300 files came out as `.bin`.
+    The parser has to decide by looking at the decrypted head, not by trusting one formula.
+    """
+    path = ncm(cover=cover, pad_after_cover=b"\x00\x00\x00\x00")
+    result = decrypt_file(path)
+    assert result.fmt == "flac"
+    assert result.audio == AUDIO
+
+
 @pytest.mark.parametrize("size", [0, 1, 15, 16, 17, 255, 256, 257, 4096, 4097])
 def test_audio_lengths_roundtrip(ncm, size):
     audio = B.fake_flac(bytes(size))
