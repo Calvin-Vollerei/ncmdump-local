@@ -141,6 +141,27 @@ DWMSBT_MAINWINDOW = 2      # "Mica"
 DWMSBT_TRANSIENTWINDOW = 3  # "Acrylic"
 DWMWA_CAPTION_COLOR = 35
 
+# --- Win32 window style bits -------------------------------------------------
+#
+# Qt's FramelessWindowHint turns the window into a plain WS_POPUP. The shell then stops
+# treating it as an application window at all: no Aero Snap, no drag-to-edge tiling, no
+# Win+arrow. Restoring WS_THICKFRAME / WS_MAXIMIZEBOX puts it back on the shell's radar;
+# WM_NCCALCSIZE is then answered in nativeEvent so the 7 px border the frame style implies
+# never shows up in the client area.
+GWL_STYLE = -16
+WS_POPUP = 0x80000000
+WS_CAPTION = 0x00C00000
+WS_THICKFRAME = 0x00040000
+WS_MAXIMIZEBOX = 0x00010000
+WS_MINIMIZEBOX = 0x00020000
+WS_SYSMENU = 0x00080000
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_FRAMECHANGED = 0x0020
+WM_NCCALCSIZE = 0x0083
+WM_NCHITTEST = 0x0084
+
 
 def _dwm_set(hwnd, attr, value):
     import ctypes
@@ -221,23 +242,11 @@ def apply_glass(hwnd: int, enabled: bool = True, prefer: str = "") -> str:
     return "none"
 
 
-def enable_shadow(hwnd: int) -> None:
-    """Give the frameless window a shadow so it does not look pasted onto the desktop."""
-    if os.name != "nt":
-        return
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        class MARGINS(ctypes.Structure):
-            _fields_ = [("cxLeftWidth", ctypes.c_int), ("cxRightWidth", ctypes.c_int),
-                        ("cyTopHeight", ctypes.c_int), ("cyBottomHeight", ctypes.c_int)]
-
-        margins = MARGINS(1, 1, 1, 1)
-        ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(
-            wintypes.HWND(hwnd), ctypes.byref(margins))
-    except Exception:
-        pass
+# NOTE: this used to call DwmExtendFrameIntoClientArea(hwnd, MARGINS(1,1,1,1)) to get a
+# shadow on the frameless window. It is deliberately gone: that call also paints a 1 px
+# accent border around the whole window, which is the "extra ring" that showed up on
+# screen. Restoring WS_THICKFRAME (see MainWindow._enable_snap) makes DWM supply the
+# normal window shadow instead, with no border of its own.
 
 
 # --- Qt ---------------------------------------------------------------------
@@ -295,7 +304,7 @@ QWidget { color: #eef3ff; font-family: "Microsoft YaHei UI", "Segoe UI", sans-se
 /* ---- main glass card: one continuous sheet, edges only where groups need them ---- */
 #card {
     background: rgba(14, 19, 34, 26);
-    border: 1px solid rgba(255, 255, 255, 30);
+    border: none;
     border-radius: 22px;
 }
 #card[solid="true"] {
@@ -892,6 +901,32 @@ class MainWindow(QWidget):
         else:
             self.showMaximized()
 
+    def _enable_snap(self) -> None:
+        """Put the window back in the shell's window list so Aero Snap works.
+
+        ``FramelessWindowHint`` leaves the window as a bare ``WS_POPUP``. The shell then
+        does not treat it as an application window at all: no Aero Snap, no drag-to-edge
+        tiling, no ``Win`` + arrow. Re-adding the resize / maximise bits is what brings
+        those back. ``WM_NCCALCSIZE`` in ``nativeEvent`` keeps the 7 px frame that the
+        style implies out of the client area, so the look does not change.
+        """
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            hwnd = int(self.winId())
+            style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+            style = (style & ~WS_POPUP & ~WS_CAPTION
+                     | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU)
+            user32.SetWindowLongW(hwnd, GWL_STYLE, ctypes.c_int32(style).value)
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                                SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED)
+            _boot_log("snap enabled: style=%#010x" % (style & 0xFFFFFFFF))
+        except Exception as exc:
+            _boot_log("snap style failed: %s" % exc)
+
     #: Height of the in-app title strip; drag / Snap / maximise are delegated to the shell.
     TITLEBAR_HEIGHT = 44
     #: Right-hand zone holding the window dots, which must stay clickable (HTCLIENT).
@@ -914,7 +949,12 @@ class MainWindow(QWidget):
                 from ctypes import wintypes
 
                 msg = wintypes.MSG.from_address(int(message))
-                if msg.message == 0x0084:                      # WM_NCHITTEST
+                if msg.message == WM_NCCALCSIZE:
+                    # The frame style implies a 7 px border. Answering here (with the
+                    # client rect left untouched) keeps the client area equal to the whole
+                    # window, so the border never becomes visible.
+                    return True, 0
+                if msg.message == WM_NCHITTEST:
                     sx = ctypes.c_short(msg.lParam & 0xFFFF).value
                     sy = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
                     rect = wintypes.RECT()
@@ -962,10 +1002,12 @@ class MainWindow(QWidget):
 
     def _apply_win_effects(self):
         hwnd = int(self.winId())
-        try:
-            enable_shadow(hwnd)
-        except Exception:
-            pass
+        # Snap / tiling need the window to look like an app window to the shell, and that
+        # same change is what gives us a normal drop shadow: with WS_THICKFRAME back, DWM
+        # treats it as an ordinary window and draws the usual shadow. The old
+        # DwmExtendFrameIntoClientArea(1,1,1,1) trick is therefore gone — it painted a 1 px
+        # accent border around the whole window, which read as an unwanted extra ring.
+        self._enable_snap()
 
         # Native window material through pywinstyles (acrylic by default), falling back to
         # the raw DWM backdrop API if the package is missing.
