@@ -1204,7 +1204,7 @@ class MainWindow(QWidget):
         for btn in (self.btn_general, self.btn_help, self.btn_about):
             btn.setObjectName("menu")
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedHeight(32)
+            btn.setFixedHeight(36)
             bar.addWidget(btn)
         self.btn_general.clicked.connect(self.open_settings)
         self.btn_help.clicked.connect(self.open_help)
@@ -1218,7 +1218,7 @@ class MainWindow(QWidget):
         self.btn_update = QPushButton(self.t("check_update"))
         self.btn_update.setObjectName("ghost")
         self.btn_update.setToolTip(self.t("update_tooltip"))
-        self.btn_update.setFixedHeight(32)
+        self.btn_update.setFixedHeight(36)
         self.btn_update.clicked.connect(self.check_updates)
         bar.addWidget(self.lbl_update)
         bar.addWidget(self.btn_update)
