@@ -770,7 +770,10 @@ class MainWindow(QWidget):
         opts.setSpacing(16)
         self.chk_keep = QCheckBox("保留 .ncm")
         self.chk_lyrics = QCheckBox("嵌入歌词")
-        self.chk_lyrics.setChecked(True)
+        # Off by default: the tag always carries the lyrics anyway, and this box only
+        # controls the extra .lrc sidecar. Leaving it on made every conversion drop an
+        # .lrc next to the audio, which reads as a surprise rather than a feature.
+        self.chk_lyrics.setChecked(False)
         self.chk_verify = QCheckBox("删除前逐字节校验")
         self.chk_verify.setChecked(True)
         self.chk_cover = QCheckBox("下载封面")
