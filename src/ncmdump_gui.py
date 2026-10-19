@@ -619,6 +619,11 @@ class MainWindow(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(120)
         self.timer.timeout.connect(self._drain_queue)
+        # Always ticking. It used to be started by start() and stopped on "done", which was
+        # fine while conversion was the only producer on the queue - but the update check
+        # also posts its result there, so with no conversion running the "检查中…" label
+        # never got replaced and the button looked broken.
+        self.timer.start()
 
     # ---------------------------------------------------------------- layout
     def _build_ui(self):
@@ -1325,7 +1330,6 @@ class MainWindow(QWidget):
             elif kind == "fatal":
                 self._append_log("致命错误：" + payload.get("error", ""))
             elif kind == "done":
-                self.timer.stop()
                 self._drain_queue()
                 self._finish()
 
