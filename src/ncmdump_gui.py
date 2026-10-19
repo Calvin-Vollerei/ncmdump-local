@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -337,10 +338,12 @@ QWidget { color: #eef3ff; font-family: "Microsoft YaHei", "Microsoft YaHei UI", 
     border-radius: 16px;
 }
 QPushButton#menu {
-    background: transparent; border: none; border-radius: 9px;
-    padding: 8px 18px; font-size: 13px; font-weight: 700;
+    background: rgba(255, 255, 255, 22);
+    border: 1px solid rgba(255, 255, 255, 26);
+    border-radius: 9px; padding: 8px 18px; font-size: 13px; font-weight: 700;
 }
-QPushButton#menu:hover { background: rgba(255, 255, 255, 34); }
+QPushButton#menu:hover { background: rgba(255, 255, 255, 52); }
+QPushButton#menu:pressed { background: rgba(86, 182, 255, 90); }
 #appheader { background: transparent; }
 #title { font-size: 16px; font-weight: 700; letter-spacing: 0.4px; }
 #subtitle { color: rgba(232, 240, 255, 205); font-size: 11px; }
@@ -446,10 +449,12 @@ QWidget { color: #16202e; font-family: "Microsoft YaHei", "Microsoft YaHei UI", 
 #panelOpt { background: rgba(46, 200, 150, 30); border: 1px solid rgba(46, 190, 150, 86); border-radius: 16px; }
 #panelRun { background: rgba(158, 118, 255, 34); border: 1px solid rgba(158, 118, 255, 86); border-radius: 16px; }
 QPushButton#menu {
-    background: transparent; border: none; border-radius: 9px;
-    padding: 8px 18px; font-size: 13px; font-weight: 700;
+    background: rgba(255, 255, 255, 70);
+    border: 1px solid rgba(20, 40, 80, 34);
+    border-radius: 9px; padding: 8px 18px; font-size: 13px; font-weight: 700;
 }
-QPushButton#menu:hover { background: rgba(20, 40, 80, 26); }
+QPushButton#menu:hover { background: rgba(255, 255, 255, 160); }
+QPushButton#menu:pressed { background: rgba(86, 160, 255, 110); }
 #appheader { background: transparent; }
 #title { font-size: 16px; font-weight: 700; letter-spacing: 0.4px; color: #10203a; }
 #subtitle { color: rgba(30, 45, 70, 190); font-size: 11px; }
@@ -569,6 +574,11 @@ STRINGS = {
         "lang_ko": "韩文",
         "lang_ru": "俄文（西里尔）",
         "lang_other": "其他（英法等拉丁字母）",
+        "folder_zh": "中文",
+        "folder_ja": "日文",
+        "folder_ko": "韩文",
+        "folder_ru": "俄文",
+        "folder_other": "其他",
         "lang_tip": "检测为「%s」的歌曲放进哪个文件夹（可改）",
         "keep": "保留 .ncm",
         "lyrics": "嵌入歌词",
@@ -685,6 +695,11 @@ STRINGS = {
         "lang_ko": "Korean",
         "lang_ru": "Russian (Cyrillic)",
         "lang_other": "Other (Latin script)",
+        "folder_zh": "Chinese",
+        "folder_ja": "Japanese",
+        "folder_ko": "Korean",
+        "folder_ru": "Russian",
+        "folder_other": "Other",
         "lang_tip": "Folder for tracks detected as %s (editable)",
         "keep": "Keep .ncm",
         "lyrics": "Embed lyrics",
@@ -775,6 +790,33 @@ STRINGS = {
 
 LANG_CHOICES = ("system", "zh", "en")
 THEME_CHOICES = ("system", "light", "dark")
+
+
+def _settings_path() -> str:
+    """Where the language/theme choice is remembered between runs."""
+    base = QStandardPaths.writableLocation(QStandardPaths.AppConfigLocation)
+    return os.path.join(base or os.path.expanduser("~"), "settings.json")
+
+
+def load_settings() -> dict:
+    try:
+        with open(_settings_path(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:                                  # noqa: BLE001 - missing/broken file is fine
+        return {}
+
+
+def save_settings(data: dict) -> None:
+    try:
+        path = _settings_path()
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+    except Exception:                                  # noqa: BLE001 - never block the UI
+        pass
 
 
 def detect_language() -> str:
@@ -1028,13 +1070,17 @@ class MainWindow(QWidget):
         # the shell's Aero Snap and edge-resize hit areas, so drag / double-click maximise /
         # edge resize are re-implemented below on top of QWindow.startSystemMove and
         # startSystemResize.
-        # Interface language and theme: follow the OS unless NCM_LANG / NCM_THEME say
-        # otherwise. The overrides exist so a headless screenshot run is deterministic.
-        self.lang_setting = os.environ.get("NCM_LANG", "system").strip().lower()
+        # Interface language and theme: an explicit NCM_LANG / NCM_THEME wins (so a headless
+        # screenshot run is deterministic), then the choice saved by the settings dialog,
+        # then follow the OS.
+        saved = load_settings()
+        lang_raw = os.environ.get("NCM_LANG") or saved.get("language") or "system"
+        self.lang_setting = str(lang_raw).strip().lower()
         if self.lang_setting not in LANG_CHOICES:
             self.lang_setting = "system"
         self.lang = resolve_language(self.lang_setting)
-        self.theme_setting = os.environ.get("NCM_THEME", "system").strip().lower()
+        theme_raw = os.environ.get("NCM_THEME") or saved.get("theme") or "system"
+        self.theme_setting = str(theme_raw).strip().lower()
         if self.theme_setting not in THEME_CHOICES:
             self.theme_setting = "system"
 
@@ -1252,7 +1298,7 @@ class MainWindow(QWidget):
         self.lbl_lang_hint = QLabel(self.t("dir_names"))
         self.lbl_lang_hint.setObjectName("sectionTitle")
         lang_row.addWidget(self.lbl_lang_hint)
-        defaults = {"zh": "中文", "ja": "日文", "ko": "韩文", "ru": "俄文", "other": "其他"}
+        defaults = {code: self.t("folder_" + code) for code in self._languages}
         titles = {"zh": self.t("lang_zh"), "ja": self.t("lang_ja"),
                   "ko": self.t("lang_ko"), "ru": self.t("lang_ru"),
                   "other": self.t("lang_other")}
@@ -1400,13 +1446,39 @@ class MainWindow(QWidget):
         if dlg.exec() != QDialog.Accepted:
             return
         lang_setting, theme_setting = dlg.result_settings()
-        changed_lang = lang_setting != self.lang_setting
+        old_lang = self.lang
         self.lang_setting = lang_setting
         self.theme_setting = theme_setting
+        save_settings({"language": lang_setting, "theme": theme_setting})
         self._apply_theme()
-        if changed_lang and resolve_language(lang_setting) != self.lang:
-            # strings are baked into the widgets, so a language change needs a fresh window
-            self._append_log(self.t("lang_changed"))
+        if resolve_language(lang_setting) != old_lang:
+            self._restart()
+
+    def _restart(self):
+        """Rebuild the window in the newly chosen language.
+
+        Every string is baked into its widget at construction time, so a language switch
+        means building the interface again. Queued files, the output folder and the window
+        position carry over; a folder name is kept only if the user actually renamed it.
+        """
+        files = list(self.files)
+        out_dir = self.ed_out.text()
+        position = self.pos()
+        old_texts = {code: edit.text() for code, edit in self.lang_fields.items()}
+        old_defaults = {code: STRINGS[self.lang].get("folder_" + code, "")
+                        for code in old_texts}
+
+        fresh = MainWindow()
+        fresh.files = files
+        fresh.ed_out.setText(out_dir)
+        fresh.add_paths([])
+        for code, edit in fresh.lang_fields.items():
+            current = old_texts.get(code)
+            if current and current != old_defaults.get(code):
+                edit.setText(current)      # the user renamed it - do not throw that away
+        fresh.move(position)
+        fresh.show()
+        self.close()
 
     # ----------------------------------------------------------- window chrome
     def _panel(self, name: str) -> QFrame:
