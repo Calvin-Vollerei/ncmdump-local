@@ -25,9 +25,9 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from ncmdump.metadata import DEVELOPER, RELEASES_URL, VERSION
+    from ncmdump.metadata import DEVELOPER, RELEASES_URL, REPO_URL, VERSION
 except ImportError:                       # pragma: no cover - only before build/install
-    DEVELOPER, RELEASES_URL, VERSION = "Calvin Vollerei Studio", "", "0.0.0"
+    DEVELOPER, REPO_URL, RELEASES_URL, VERSION = ("Calvin Vollerei Studio", "", "", "0.0.0")
 
 # --- window material --------------------------------------------------------
 #
@@ -76,17 +76,18 @@ def apply_window_style(window, mode: str) -> str:
         return "none"
 
 
-def window_stylesheet(glass_on: bool) -> str:
+def window_stylesheet(glass_on: bool, base: str = "") -> str:
     """Global styling plus a rule that keeps the window's own background transparent.
 
-    The extra rule is *appended* to the app stylesheet rather than set on its own:
-    ``setStyleSheet`` replaces, so assigning just that one rule would strip every other
-    style in the app.
+    The extra rule is *appended* to the active theme sheet rather than set on its own:
+    ``setStyleSheet`` replaces, and a window-level sheet outranks the application one, so
+    hard-coding a base here silently pins the window to that theme no matter what the user
+    picked.
     """
     extra = ""
     if glass_on:
         extra = "\nQWidget#root { background: transparent; }\n"
-    return STYLE + extra
+    return (base or STYLE) + extra
 
 
 DWMWA_BORDER_COLOR = 34
@@ -251,7 +252,7 @@ def apply_glass(hwnd: int, enabled: bool = True, prefer: str = "") -> str:
 
 # --- Qt ---------------------------------------------------------------------
 
-from PySide6.QtCore import QRectF, QStandardPaths, Qt, QTimer, Signal  # noqa: E402
+from PySide6.QtCore import QLocale, QRectF, QStandardPaths, Qt, QTimer, Signal  # noqa: E402
 from PySide6.QtGui import (  # noqa: E402
     QColor,
     QFont,
@@ -265,11 +266,15 @@ from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -331,6 +336,11 @@ QWidget { color: #eef3ff; font-family: "Microsoft YaHei", "Microsoft YaHei UI", 
     border: 1px solid rgba(190, 160, 255, 44);
     border-radius: 16px;
 }
+QPushButton#menu {
+    background: transparent; border: none; border-radius: 8px;
+    padding: 4px 10px; font-size: 12px; font-weight: 700;
+}
+QPushButton#menu:hover { background: rgba(255, 255, 255, 34); }
 #appheader { background: transparent; }
 #title { font-size: 16px; font-weight: 700; letter-spacing: 0.4px; }
 #subtitle { color: rgba(232, 240, 255, 205); font-size: 11px; }
@@ -415,6 +425,383 @@ QScrollBar::handle:vertical { background: rgba(255, 255, 255, 80); border-radius
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 """
 
+# Same structure as STYLE, with the surfaces inverted. Kept as a separate sheet rather than
+# computed from STYLE: a colour-substitution pass would silently miss any rule added later.
+LIGHT_STYLE = """
+QWidget { color: #16202e; font-family: "Microsoft YaHei", "Microsoft YaHei UI", "Segoe UI", sans-serif; font-size: 13px; font-weight: 700; }
+#root { background: transparent; }
+#card { background: rgba(255, 255, 255, 36); border: none; border-radius: 22px; }
+#card[solid="true"] { background: rgba(250, 251, 255, 246); }
+#panel { background: rgba(255, 255, 255, 14); border: 1px solid rgba(20, 40, 80, 34); border-radius: 16px; }
+#panelOut { background: rgba(86, 160, 255, 34); border: 1px solid rgba(86, 160, 255, 86); border-radius: 16px; }
+#panelOpt { background: rgba(46, 200, 150, 30); border: 1px solid rgba(46, 190, 150, 86); border-radius: 16px; }
+#panelRun { background: rgba(158, 118, 255, 34); border: 1px solid rgba(158, 118, 255, 86); border-radius: 16px; }
+QPushButton#menu {
+    background: transparent; border: none; border-radius: 8px;
+    padding: 4px 10px; font-size: 12px; font-weight: 700;
+}
+QPushButton#menu:hover { background: rgba(20, 40, 80, 26); }
+#appheader { background: transparent; }
+#title { font-size: 16px; font-weight: 700; letter-spacing: 0.4px; color: #10203a; }
+#subtitle { color: rgba(30, 45, 70, 190); font-size: 11px; }
+#langTag { color: rgba(40, 70, 120, 200); font-size: 10px; letter-spacing: 0.5px; }
+#footerText { color: rgba(40, 55, 80, 190); font-size: 11px; }
+QComboBox {
+    background: rgba(255, 255, 255, 120); border: 1px solid rgba(20, 40, 80, 52);
+    border-radius: 11px; padding: 7px 12px; color: #16202e;
+}
+QComboBox:hover { background: rgba(255, 255, 255, 170); }
+QComboBox::drop-down { border: none; width: 22px; }
+QComboBox QAbstractItemView {
+    background: #ffffff; border: none; selection-background-color: rgba(86, 160, 255, 70);
+    color: #16202e; outline: none;
+}
+#drop { background: rgba(255, 110, 160, 44); border: 1px solid rgba(255, 120, 170, 96); border-radius: 18px; }
+#drop[hot="true"] { background: rgba(255, 150, 190, 96); }
+#dropTitle { font-size: 15px; font-weight: 600; color: #10203a; }
+#dropHint { color: rgba(45, 60, 90, 195); font-size: 12px; }
+#sectionTitle { color: rgba(40, 58, 90, 215); font-size: 11px; font-weight: 600; letter-spacing: 1px; }
+QPushButton#ghost {
+    background: rgba(255, 255, 255, 120); border: 1px solid rgba(20, 40, 80, 52);
+    border-radius: 11px; padding: 8px 16px;
+}
+QPushButton#ghost:hover { background: rgba(255, 255, 255, 170); }
+QPushButton#ghost:disabled { color: rgba(30, 45, 70, 110); background: rgba(255, 255, 255, 90); }
+QPushButton#primary {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a9eff, stop:1 #8a6cff);
+    border: 1px solid rgba(255, 255, 255, 160); border-radius: 14px;
+    padding: 12px 26px; font-size: 14px; font-weight: 700; color: #ffffff;
+}
+QPushButton#primary:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #62abff, stop:1 #9c80ff); }
+QPushButton#primary:disabled { background: rgba(30, 45, 70, 46); color: rgba(30, 45, 70, 120); }
+QPushButton#danger {
+    background: rgba(240, 84, 96, 235); border: 1px solid rgba(255, 255, 255, 120);
+    border-radius: 14px; padding: 12px 20px; font-weight: 700; color: white;
+}
+QPushButton#danger:hover { background: rgba(250, 104, 114, 250); }
+QPushButton#danger:disabled { background: rgba(30, 45, 70, 36); color: rgba(30, 45, 70, 110); }
+QLineEdit {
+    background: rgba(255, 255, 255, 120); border: 1px solid rgba(20, 40, 80, 52);
+    border-radius: 11px; padding: 8px 12px; selection-background-color: rgba(86, 160, 255, 90);
+}
+QLineEdit:focus { background: #ffffff; border: 1px solid rgba(86, 160, 255, 170); }
+QLineEdit:disabled { color: rgba(30, 45, 70, 110); background: rgba(255, 255, 255, 110); }
+QCheckBox { spacing: 8px; color: rgba(25, 40, 65, 240); }
+QCheckBox::indicator { width: 17px; height: 17px; border-radius: 5px;
+                       border: 1px solid rgba(20, 40, 80, 62); background: rgba(255, 255, 255, 140); }
+QCheckBox::indicator:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #4a9eff, stop:1 #8a6cff);
+    border: 1px solid rgba(86, 160, 255, 170);
+}
+QProgressBar {
+    background: rgba(255, 255, 255, 110); border: 1px solid rgba(20, 40, 80, 40);
+    border-radius: 7px; height: 14px; text-align: center;
+    color: rgba(20, 35, 60, 235); font-size: 10px;
+}
+QProgressBar::chunk {
+    border-radius: 7px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4a9eff, stop:1 #8a6cff);
+}
+#log {
+    background: transparent; border: none; padding: 9px;
+    color: rgba(20, 35, 60, 240);
+    font-family: "Microsoft YaHei", "Microsoft YaHei UI", sans-serif;
+    font-size: 11px; font-weight: 700;
+}
+#stat { color: rgba(25, 40, 65, 240); font-size: 12px; }
+#statAccent { color: #2a6fd6; font-weight: 600; }
+QScrollArea { background: transparent; }
+QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
+QScrollBar::handle:vertical { background: rgba(30, 50, 80, 110); border-radius: 4px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+"""
+
+# Interface strings. One table per language, keyed by the same names, so a missing key is
+# visible as an odd label rather than a crash; ``MainWindow.t`` falls back to zh then to
+# the key itself.
+STRINGS = {
+    "zh": {
+        "app_name": "NCM 本地转换器",
+        "app_sub": "NCM Converter",
+        "menu_general": "通用",
+        "menu_help": "帮助",
+        "menu_about": "关于",
+        "menu_view": "查看",
+        "menu_version": "版本 %s",
+        "check_update": "检查更新",
+        "update_tooltip": "从 GitHub Releases 检查是否有新版本（需要联网）",
+        "checking": "检查中…",
+        "update_available": "有新版本",
+        "update_latest": "已是最新版本",
+        "update_failed": "检查失败，",
+        "view_releases": "手动查看 Releases",
+        "drop_title": "把 .ncm 文件或文件夹拖到这里",
+        "drop_hint": "也可以点下面的按钮选择；支持递归目录",
+        "out_dir": "输出目录",
+        "out_dir_ph": "留空 = 转换到每个 .ncm 所在目录",
+        "choose": "选择…",
+        "organize": "整理方式",
+        "organize_none": "不分类（全部放输出目录）",
+        "organize_lang": "按语言分目录",
+        "organize_artist": "按歌手分目录",
+        "organize_both": "按语言 + 歌手（两级）",
+        "preview": "预览落点",
+        "preview_tip": "不转换，只列出每首歌会落到哪个文件夹",
+        "dir_names": "目录名",
+        "lang_zh": "中文",
+        "lang_ja": "日文（含假名）",
+        "lang_ko": "韩文",
+        "lang_ru": "俄文（西里尔）",
+        "lang_other": "其他（英法等拉丁字母）",
+        "lang_tip": "检测为「%s」的歌曲放进哪个文件夹（可改）",
+        "keep": "保留 .ncm",
+        "lyrics": "嵌入歌词",
+        "verify": "删除前逐字节校验",
+        "cover": "下载封面",
+        "go": "开始转换",
+        "stop": "停止",
+        "open_out": "打开输出目录",
+        "waiting": "等待任务",
+        "ready": "就绪",
+        "version_tip": "版本 %s，由 %s 开发",
+        "win_min": "最小化",
+        "win_max": "最大化 / 还原（贴合）",
+        "win_close": "关闭",
+        "settings_title": "通用",
+        "language": "语言",
+        "lang_system": "跟随系统",
+        "theme": "主题",
+        "theme_light": "日间",
+        "theme_dark": "夜间",
+        "theme_system": "跟随系统",
+        "apply": "应用",
+        "close": "关闭",
+        "help_title": "帮助",
+        "help_text": (
+            "把 .ncm 文件或整个文件夹拖进窗口，选好输出目录与整理方式，点「开始转换」。\n\n"
+            "· 输出目录留空时，每首歌会转换到它自己所在的目录。\n"
+            "· 「预览落点」不转换，只列出每首歌会落到哪个文件夹。\n"
+            "· 勾选「删除前逐字节校验」后，只有解出的音频与落盘文件完全一致才会删除源文件。\n"
+            "· 「嵌入歌词」只控制是否额外导出 .lrc 旁文件，标签里的歌词始终会写入。\n"
+            "· 拖动窗口到屏幕边缘可吸附；双击标题栏可最大化。\n\n"
+            "遇到问题时请到仓库 Issues 反馈。"
+        ),
+        "about_title": "关于",
+        "about_text": (
+            "NCM 本地转换器 %s\n\n"
+            "把网易云音乐的 .ncm 文件在本地转换成可播放的 FLAC/MP3。\n"
+            "全程离线：不联网、不登录、不上传任何文件。\n\n"
+            "开发者：%s\n"
+            "许可证：MIT\n"
+            "项目主页：%s"
+        ),
+        "about_ok": "好",
+        "lang_changed": "界面语言已切换，需要重启后完全生效。",
+        "drop_selected": "已选择 %d 个 .ncm（%s）",
+        "drop_more": "可以继续拖入更多文件；点「开始转换」即可",
+        "pending": "待转换 %d 个文件 · %s",
+        "add_none": "请先拖入或选择 .ncm 文件",
+        "add_new": "已加入 %d 个文件",
+        "add_dup": "没有找到新的 .ncm 文件",
+        "other_empty": "「其他」目录名不能为空（其他语种会没有去处）",
+        "other_empty_short": "「其他」目录名不能为空",
+        "out_unusable": "输出目录不可用：%s",
+        "out_missing": "输出目录不存在：%s（未指定时输出在源文件所在目录）",
+        "empty_paren": "(空)",
+        "open_failed": "打开失败：%s",
+        "cleaned": "清理了 %d 个上次中断残留的临时文件",
+        "started": "开始转换 %d 个文件（%s）→ %s",
+        "src_dir": "源文件所在目录",
+        "stopping": "正在停止…（已开始的当前文件会跑完）",
+        "fatal": "致命错误：",
+        "stage_metadata": "读取信息",
+        "stage_decrypt": "解密音频",
+        "stage_cover": "下载封面",
+        "stage_tag": "写入标签",
+        "stage_verify": "校验",
+        "processing": "正在处理：%s  ·  %s",
+        "item_failed": "✗ %s  失败：%s",
+        "progress": "完成 %d/%d · 成功 %d · 失败 %d",
+        "done_summary": "完成：成功 %d，失败 %d，用时 %.1fs",
+        "done_stat": "完成 %d/%d · 成功 %d · 失败 %d · 用时 %.1fs",
+        "preview_title": "落点预览（共 %d 首）：",
+        "preview_row": "    %-34s %d 首",
+        "src_dir_label": "（源目录）",
+        "read_failed": "（读取失败：%s）",
+        "unknown_reason": "未知原因",
+        "update_found": "发现新版本 %s：%s",
+        "update_latest_log": "已是最新版本（v%s）",
+        "update_unavailable": "更新检查不可用：%s",
+        "log_checking": "正在检查更新…（%s）",
+        "choose_out_dir": "选择输出目录",
+        "out_dir_set": "输出目录：",
+    },
+    "en": {
+        "app_name": "NCM Converter",
+        "app_sub": "NCM Converter",
+        "menu_general": "General",
+        "menu_help": "Help",
+        "menu_about": "About",
+        "menu_view": "View",
+        "menu_version": "Version %s",
+        "check_update": "Check for updates",
+        "update_tooltip": "Ask GitHub Releases whether a newer version exists (needs network)",
+        "checking": "Checking…",
+        "update_available": "Update available",
+        "update_latest": "You have the latest version",
+        "update_failed": "Check failed, ",
+        "view_releases": "open Releases manually",
+        "drop_title": "Drop .ncm files or folders here",
+        "drop_hint": "or use the buttons below; subfolders are searched too",
+        "out_dir": "Output folder",
+        "out_dir_ph": "empty = convert next to each .ncm",
+        "choose": "Browse…",
+        "organize": "Organise",
+        "organize_none": "Flat (everything in the output folder)",
+        "organize_lang": "By language",
+        "organize_artist": "By artist",
+        "organize_both": "Language then artist (two levels)",
+        "preview": "Preview",
+        "preview_tip": "Do not convert; just list where each track would land",
+        "dir_names": "Folder names",
+        "lang_zh": "Chinese",
+        "lang_ja": "Japanese (with kana)",
+        "lang_ko": "Korean",
+        "lang_ru": "Russian (Cyrillic)",
+        "lang_other": "Other (Latin script)",
+        "lang_tip": "Folder for tracks detected as %s (editable)",
+        "keep": "Keep .ncm",
+        "lyrics": "Embed lyrics",
+        "verify": "Byte-for-byte check",
+        "cover": "Download cover",
+        "go": "Convert",
+        "stop": "Stop",
+        "open_out": "Open output",
+        "waiting": "Idle",
+        "ready": "Ready",
+        "version_tip": "Version %s by %s",
+        "win_min": "Minimise",
+        "win_max": "Maximise / restore (snap)",
+        "win_close": "Close",
+        "settings_title": "General",
+        "language": "Language",
+        "lang_system": "Follow system",
+        "theme": "Theme",
+        "theme_light": "Light",
+        "theme_dark": "Dark",
+        "theme_system": "Follow system",
+        "apply": "Apply",
+        "close": "Close",
+        "help_title": "Help",
+        "help_text": (
+            "Drag .ncm files or a whole folder into the window, pick an output folder and how\n"
+            "to organise it, then press Convert.\n\n"
+            "· With an empty output folder, each track is written next to its own .ncm.\n"
+            "· Preview lists where every track would land without converting anything.\n"
+            "· With the byte-for-byte check on, a source file is only deleted after the\n"
+            "  written audio matches what was decrypted.\n"
+            "· Embed lyrics only controls the extra .lrc sidecar; the tags always carry them.\n"
+            "· Drag the window to a screen edge to snap; double-click the title strip to\n"
+            "  maximise.\n\n"
+            "Please report problems in the repository Issues."
+        ),
+        "about_title": "About",
+        "about_text": (
+            "NCM Converter %s\n\n"
+            "Converts NetEase Cloud Music .ncm files to playable FLAC/MP3, locally.\n"
+            "Fully offline: no network, no account, nothing uploaded.\n\n"
+            "Developer: %s\n"
+            "Licence: MIT\n"
+            "Project: %s"
+        ),
+        "about_ok": "OK",
+        "lang_changed": "Interface language saved; restart to apply it fully.",
+        "drop_selected": "%d .ncm selected (%s)",
+        "drop_more": "Drop more files, or press Convert",
+        "pending": "%d file(s) queued · %s",
+        "add_none": "Drop or choose .ncm files first",
+        "add_new": "Added %d file(s)",
+        "add_dup": "No new .ncm files found",
+        "other_empty": "The 'other' folder name cannot be empty (those tracks would have nowhere to go)",
+        "other_empty_short": "The 'other' folder name cannot be empty",
+        "out_unusable": "Output folder unusable: %s",
+        "out_missing": "Output folder missing: %s (with none set, files land beside their source)",
+        "empty_paren": "(empty)",
+        "open_failed": "Could not open: %s",
+        "cleaned": "Removed %d temp file(s) left by an interrupted run",
+        "started": "Converting %d file(s) (%s) -> %s",
+        "src_dir": "source folders",
+        "stopping": "Stopping… (the current file will finish)",
+        "fatal": "Fatal error: ",
+        "stage_metadata": "reading metadata",
+        "stage_decrypt": "decrypting audio",
+        "stage_cover": "fetching cover",
+        "stage_tag": "writing tags",
+        "stage_verify": "verifying",
+        "processing": "Working: %s  ·  %s",
+        "item_failed": "✗ %s  failed: %s",
+        "progress": "%d/%d done · %d ok · %d failed",
+        "done_summary": "Done: %d ok, %d failed, %.1fs",
+        "done_stat": "%d/%d done · %d ok · %d failed · %.1fs",
+        "preview_title": "Preview: %d track(s)",
+        "preview_row": "    %-34s %d",
+        "src_dir_label": "(source folder)",
+        "read_failed": "(read failed: %s)",
+        "unknown_reason": "unknown reason",
+        "update_found": "New version %s: %s",
+        "update_latest_log": "Already up to date (v%s)",
+        "update_unavailable": "Update check unavailable: %s",
+        "log_checking": "Checking for updates… (%s)",
+        "choose_out_dir": "Choose output folder",
+        "out_dir_set": "Output folder: ",
+    },
+}
+
+LANG_CHOICES = ("system", "zh", "en")
+THEME_CHOICES = ("system", "light", "dark")
+
+
+def detect_language() -> str:
+    """zh when the system UI language is Chinese, otherwise en.
+
+    GetUserDefaultUILanguage is asked first: QLocale.system() follows the *process* locale,
+    which a launcher or parent shell can leave as C, so the Qt answer alone is unreliable.
+    """
+    try:
+        import ctypes
+
+        lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+        return "zh" if (lang_id & 0x3FF) == 0x04 else "en"
+    except Exception:                                  # noqa: BLE001 - never fatal
+        pass
+    try:
+        return "zh" if QLocale.system().language() == QLocale.Language.Chinese else "en"
+    except Exception:                                  # noqa: BLE001 - never fatal
+        return "en"
+
+
+def detect_system_dark() -> bool:
+    """Windows' "app mode" choice; dark when unreadable (matches the glass look)."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+            light, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+        return not bool(light)
+    except Exception:                                  # noqa: BLE001
+        return True
+
+
+def resolve_language(setting: str) -> str:
+    return detect_language() if setting == "system" else setting
+
+
+def resolve_dark(setting: str) -> bool:
+    return detect_system_dark() if setting == "system" else setting == "dark"
+
+
 
 class DropZone(QFrame):
     """Drag-and-drop target for .ncm files and folders."""
@@ -434,10 +821,10 @@ class DropZone(QFrame):
         self.icon = QLabel("🎵")
         self.icon.setAlignment(Qt.AlignCenter)
         self.icon.setStyleSheet("font-size: 30px;")
-        self.title = QLabel("把 .ncm 文件或文件夹拖到这里")
+        self.title = QLabel("")
         self.title.setObjectName("dropTitle")
         self.title.setAlignment(Qt.AlignCenter)
-        self.hint = QLabel("也可以点下面的按钮选择；支持递归子目录")
+        self.hint = QLabel("")
         self.hint.setObjectName("dropHint")
         self.hint.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.icon)
@@ -566,6 +953,49 @@ class GlassBackdrop(QWidget):
         QTimer.singleShot(120, self.update_backdrop)
 
 
+class SettingsDialog(QDialog):
+    """通用 dialog: interface language and theme.
+
+    Theme applies immediately; language needs a restart because every string is baked into
+    its widget at construction time.
+    """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle(parent.t("settings_title"))
+        self.setModal(True)
+        self.setMinimumWidth(380)
+
+        self.cmb_lang = QComboBox()
+        self.cmb_lang.addItem(parent.t("lang_system"), "system")
+        self.cmb_lang.addItem("中文", "zh")
+        self.cmb_lang.addItem("English", "en")
+        self.cmb_lang.setCurrentIndex(max(0, self.cmb_lang.findData(parent.lang_setting)))
+
+        self.cmb_theme = QComboBox()
+        self.cmb_theme.addItem(parent.t("theme_system"), "system")
+        self.cmb_theme.addItem(parent.t("theme_light"), "light")
+        self.cmb_theme.addItem(parent.t("theme_dark"), "dark")
+        self.cmb_theme.setCurrentIndex(max(0, self.cmb_theme.findData(parent.theme_setting)))
+
+        form = QFormLayout()
+        form.addRow(parent.t("language"), self.cmb_lang)
+        form.addRow(parent.t("theme"), self.cmb_theme)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        buttons.button(QDialogButtonBox.Ok).setText(parent.t("apply"))
+        buttons.button(QDialogButtonBox.Cancel).setText(parent.t("close"))
+
+        box = QVBoxLayout(self)
+        box.addLayout(form)
+        box.addWidget(buttons)
+
+    def result_settings(self):
+        return self.cmb_lang.currentData(), self.cmb_theme.currentData()
+
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -582,10 +1012,20 @@ class MainWindow(QWidget):
         # the shell's Aero Snap and edge-resize hit areas, so drag / double-click maximise /
         # edge resize are re-implemented below on top of QWindow.startSystemMove and
         # startSystemResize.
+        # Interface language and theme: follow the OS unless NCM_LANG / NCM_THEME say
+        # otherwise. The overrides exist so a headless screenshot run is deterministic.
+        self.lang_setting = os.environ.get("NCM_LANG", "system").strip().lower()
+        if self.lang_setting not in LANG_CHOICES:
+            self.lang_setting = "system"
+        self.lang = resolve_language(self.lang_setting)
+        self.theme_setting = os.environ.get("NCM_THEME", "system").strip().lower()
+        if self.theme_setting not in THEME_CHOICES:
+            self.theme_setting = "system"
+
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setObjectName("root")
-        self.setWindowTitle("NCM 本地转换器")
+        self.setWindowTitle(self.t("app_name"))
         self.setWindowIcon(make_icon())
         self.resize(980, 820)
         # The content genuinely needs this much: header + drop zone + three stacked panels
@@ -615,6 +1055,7 @@ class MainWindow(QWidget):
         self._material = override if override in WINDOW_MATERIALS else DEFAULT_MATERIAL
         self._glass_on = self._material != "solid"
 
+        self._apply_theme()
         self._build_ui()
         self.timer = QTimer(self)
         self.timer.setInterval(120)
@@ -624,6 +1065,23 @@ class MainWindow(QWidget):
         # also posts its result there, so with no conversion running the "检查中…" label
         # never got replaced and the button looked broken.
         self.timer.start()
+
+    # -------------------------------------------------------------- language / theme
+    def t(self, key: str) -> str:
+        """Interface string for ``key`` in the active language, falling back to Chinese."""
+        table = STRINGS.get(self.lang) or STRINGS["zh"]
+        return table.get(key) or STRINGS["zh"].get(key) or key
+
+    def _style_sheet(self) -> str:
+        """The theme sheet for the current 日间/夜间/跟随系统 choice."""
+        return STYLE if resolve_dark(self.theme_setting) else LIGHT_STYLE
+
+    def _apply_theme(self):
+        """Re-apply both the app and the window sheet for the current theme choice."""
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(self._style_sheet())
+        self.setStyleSheet(window_stylesheet(self._glass_on, self._style_sheet()))
 
     # ---------------------------------------------------------------- layout
     def _build_ui(self):
@@ -662,9 +1120,9 @@ class MainWindow(QWidget):
         dot.setStyleSheet("color: #7fc4ff; font-size: 16px;")
         title_box = QVBoxLayout()
         title_box.setSpacing(0)
-        self.lbl_title = QLabel("NCM 本地转换器")
+        self.lbl_title = QLabel(self.t("app_name"))
         self.lbl_title.setObjectName("title")
-        self.lbl_sub = QLabel("NCM Converter")
+        self.lbl_sub = QLabel(self.t("app_sub"))
         self.lbl_sub.setObjectName("subtitle")
         # Let the whole strip drag: a label that swallows the press would otherwise punch a
         # dead hole in the title bar.
@@ -676,11 +1134,39 @@ class MainWindow(QWidget):
         bar.addLayout(title_box)
         bar.addStretch(1)
 
+        # ---- menu: general / help / about live in the title strip, so there is no
+        # separate menu bar eating vertical space.
+        self.btn_general = QPushButton(self.t("menu_general"))
+        self.btn_help = QPushButton(self.t("menu_help"))
+        self.btn_about = QPushButton(self.t("menu_about"))
+        for btn in (self.btn_general, self.btn_help, self.btn_about):
+            btn.setObjectName("menu")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(26)
+            bar.addWidget(btn)
+        self.btn_general.clicked.connect(self.open_settings)
+        self.btn_help.clicked.connect(self.open_help)
+        self.btn_about.clicked.connect(self.open_about)
+        bar.addSpacing(12)
+
+        # ---- update check: moved up from the footer, next to the menus
+        self.lbl_update = QLabel("")
+        self.lbl_update.setObjectName("footerText")
+        self.lbl_update.setOpenExternalLinks(True)
+        self.btn_update = QPushButton(self.t("check_update"))
+        self.btn_update.setObjectName("ghost")
+        self.btn_update.setToolTip(self.t("update_tooltip"))
+        self.btn_update.setFixedHeight(26)
+        self.btn_update.clicked.connect(self.check_updates)
+        bar.addWidget(self.lbl_update)
+        bar.addWidget(self.btn_update)
+        bar.addSpacing(10)
+
         # ---- coloured window dots: they replace the OS title-bar buttons.
         # Order matches the request: minimise, maximise/restore ("贴合"), close.
-        self.btn_min = self._window_dot("#7bed9f", "−", "最小化")
-        self.btn_max = self._window_dot("#ffd166", "＋", "最大化 / 还原（贴合）")
-        self.btn_close = self._window_dot("#ff6b81", "×", "关闭")
+        self.btn_min = self._window_dot("#7bed9f", "−", self.t("win_min"))
+        self.btn_max = self._window_dot("#ffd166", "＋", self.t("win_max"))
+        self.btn_close = self._window_dot("#ff6b81", "×", self.t("win_close"))
         self.btn_min.clicked.connect(self.showMinimized)
         self.btn_max.clicked.connect(self._toggle_maximized)
         self.btn_close.clicked.connect(self.close)
@@ -695,6 +1181,8 @@ class MainWindow(QWidget):
         # ---- drop zone
         self.drop = DropZone()
         self.drop.filesDropped.connect(self.add_paths)
+        self.drop.title.setText(self.t("drop_title"))
+        self.drop.hint.setText(self.t("drop_hint"))
         outer.addWidget(self.drop)
 
         # ---- functional group 1: where the files go (tinted glass)
@@ -706,35 +1194,35 @@ class MainWindow(QWidget):
         # output row
         row = QHBoxLayout()
         row.setSpacing(8)
-        lbl = QLabel("输出目录")
+        lbl = QLabel(self.t("out_dir"))
         lbl.setObjectName("sectionTitle")
         self.ed_out = QLineEdit(os.environ.get("NCM_OUT_DIR", ""))
-        self.ed_out.setPlaceholderText("留空 = 转换到每个 .ncm 所在目录")
-        self.btn_out = QPushButton("选择…")
+        self.ed_out.setPlaceholderText(self.t("out_dir_ph"))
+        self.btn_out = QPushButton(self.t("choose"))
         self.btn_out.setObjectName("ghost")
         self.btn_out.clicked.connect(self.pick_output)
         row.addWidget(lbl)
         row.addWidget(self.ed_out, 1)
         row.addWidget(self.btn_out)
-        p_out.addLayout(row)
+        # (added to the bottom strip further down, together with the run controls)
 
         # ---- organize: mode + per-language folder names (all editable)
         mode_row = QHBoxLayout()
         mode_row.setSpacing(8)
-        mode_label = QLabel("整理方式")
+        mode_label = QLabel(self.t("organize"))
         mode_label.setObjectName("sectionTitle")
         self.cmb_organize = QComboBox()
         self.cmb_organize.addItems([
-            "不分类（全部放输出目录）",
-            "按语言分目录",
-            "按歌手分目录",
-            "按语言 + 歌手（两级）",
+            self.t("organize_none"),
+            self.t("organize_lang"),
+            self.t("organize_artist"),
+            self.t("organize_both"),
         ])
         self.cmb_organize.setCurrentIndex(1)
         self.cmb_organize.currentIndexChanged.connect(self._on_organize_changed)
-        self.btn_plan = QPushButton("预览落点")
+        self.btn_plan = QPushButton(self.t("preview"))
         self.btn_plan.setObjectName("ghost")
-        self.btn_plan.setToolTip("不转换，只列出每首歌会落到哪个文件夹")
+        self.btn_plan.setToolTip(self.t("preview_tip"))
         self.btn_plan.clicked.connect(self.preview_layout)
         mode_row.addWidget(mode_label)
         mode_row.addWidget(self.cmb_organize, 1)
@@ -745,19 +1233,20 @@ class MainWindow(QWidget):
         self.lang_fields = {}
         lang_row = QHBoxLayout()
         lang_row.setSpacing(6)
-        self.lbl_lang_hint = QLabel("目录名")
+        self.lbl_lang_hint = QLabel(self.t("dir_names"))
         self.lbl_lang_hint.setObjectName("sectionTitle")
         lang_row.addWidget(self.lbl_lang_hint)
         defaults = {"zh": "中文", "ja": "日文", "ko": "韩文", "ru": "俄文", "other": "其他"}
-        titles = {"zh": "中文", "ja": "日文（含假名）", "ko": "韩文", "ru": "俄文（西里尔）",
-                  "other": "其他（英法等拉丁字母）"}
+        titles = {"zh": self.t("lang_zh"), "ja": self.t("lang_ja"),
+                  "ko": self.t("lang_ko"), "ru": self.t("lang_ru"),
+                  "other": self.t("lang_other")}
         for code in self._languages:
             box = QVBoxLayout()
             box.setSpacing(2)
             tag = QLabel(code)
             tag.setObjectName("langTag")
             edit = QLineEdit(defaults.get(code, code))
-            edit.setToolTip("检测为「%s」的歌曲放进哪个文件夹（可改）" % titles.get(code, code))
+            edit.setToolTip(self.t("lang_tip") % titles.get(code, code))
             edit.setMinimumWidth(90)
             box.addWidget(tag)
             box.addWidget(edit)
@@ -773,15 +1262,15 @@ class MainWindow(QWidget):
         p_opt.setSpacing(8)
         opts = QHBoxLayout()
         opts.setSpacing(16)
-        self.chk_keep = QCheckBox("保留 .ncm")
-        self.chk_lyrics = QCheckBox("嵌入歌词")
+        self.chk_keep = QCheckBox(self.t("keep"))
+        self.chk_lyrics = QCheckBox(self.t("lyrics"))
         # Off by default: the tag always carries the lyrics anyway, and this box only
         # controls the extra .lrc sidecar. Leaving it on made every conversion drop an
         # .lrc next to the audio, which reads as a surprise rather than a feature.
         self.chk_lyrics.setChecked(False)
-        self.chk_verify = QCheckBox("删除前逐字节校验")
+        self.chk_verify = QCheckBox(self.t("verify"))
         self.chk_verify.setChecked(True)
-        self.chk_cover = QCheckBox("下载封面")
+        self.chk_cover = QCheckBox(self.t("cover"))
         for widget in (self.chk_keep, self.chk_lyrics, self.chk_verify, self.chk_cover):
             opts.addWidget(widget)
         opts.addStretch(1)
@@ -795,20 +1284,20 @@ class MainWindow(QWidget):
         p_run.setSpacing(10)
         action = QHBoxLayout()
         action.setSpacing(10)
-        self.btn_go = QPushButton("开始转换")
+        self.btn_go = QPushButton(self.t("go"))
         self.btn_go.setObjectName("primary")
         self.btn_go.clicked.connect(self.start)
-        self.btn_cancel = QPushButton("停止")
+        self.btn_cancel = QPushButton(self.t("stop"))
         self.btn_cancel.setObjectName("danger")
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.clicked.connect(self.cancel)
-        self.btn_open = QPushButton("打开输出目录")
+        self.btn_open = QPushButton(self.t("open_out"))
         self.btn_open.setObjectName("ghost")
         self.btn_open.clicked.connect(self.open_output)
         action.addWidget(self.btn_go, 2)
         action.addWidget(self.btn_cancel, 1)
         action.addWidget(self.btn_open, 1)
-        p_run.addLayout(action)
+        # (added to the bottom strip further down)
 
         # ---- progress
         self.bar = QProgressBar()
@@ -817,7 +1306,7 @@ class MainWindow(QWidget):
         self.bar.setFormat("%p%")
         p_run.addWidget(self.bar)
         stats = QHBoxLayout()
-        self.lbl_stat = QLabel("等待任务")
+        self.lbl_stat = QLabel(self.t("waiting"))
         self.lbl_stat.setObjectName("stat")
         self.lbl_speed = QLabel("")
         self.lbl_speed.setObjectName("statAccent")
@@ -851,23 +1340,23 @@ class MainWindow(QWidget):
         p_log.addWidget(scroll)
         outer.addWidget(panel_log, 1)
 
-        # ---- footer: version + developer (left), update check (right)
+        # ---- bottom strip: output folder + run controls, moved out of the middle
+        panel_bottom = self._panel("panelRun")
+        p_bottom = QVBoxLayout(panel_bottom)
+        p_bottom.setContentsMargins(14, 12, 14, 14)
+        p_bottom.setSpacing(10)
+        p_bottom.addLayout(row)
+        p_bottom.addLayout(action)
+        outer.addWidget(panel_bottom)
+
+        # ---- footer: version only; the update check lives in the title strip now
         footer = QHBoxLayout()
         footer.setSpacing(8)
         self.lbl_version = QLabel("v%s · %s" % (VERSION, DEVELOPER))
         self.lbl_version.setObjectName("footerText")
-        self.lbl_version.setToolTip("版本 %s，由 %s 开发" % (VERSION, DEVELOPER))
-        self.lbl_update = QLabel("")
-        self.lbl_update.setObjectName("footerText")
-        self.lbl_update.setOpenExternalLinks(True)
-        self.btn_update = QPushButton("检查更新")
-        self.btn_update.setObjectName("ghost")
-        self.btn_update.setToolTip("从 GitHub Releases 检查是否有新版本（需要联网）")
-        self.btn_update.clicked.connect(self.check_updates)
+        self.lbl_version.setToolTip(self.t("version_tip") % (VERSION, DEVELOPER))
         footer.addWidget(self.lbl_version)
         footer.addStretch(1)
-        footer.addWidget(self.lbl_update)
-        footer.addWidget(self.btn_update)
         outer.addLayout(footer)
 
         # Widgets must not collapse below a usable height when the window is resized: QSS
@@ -880,6 +1369,28 @@ class MainWindow(QWidget):
             widget.setMinimumHeight(42)
 
         self._on_organize_changed(self.cmb_organize.currentIndex())
+
+    # ------------------------------------------------------------ menu dialogs
+    def open_help(self):
+        QMessageBox.information(self, self.t("help_title"), self.t("help_text"))
+
+    def open_about(self):
+        QMessageBox.information(
+            self, self.t("about_title"),
+            self.t("about_text") % (VERSION, DEVELOPER, REPO_URL))
+
+    def open_settings(self):
+        dlg = SettingsDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        lang_setting, theme_setting = dlg.result_settings()
+        changed_lang = lang_setting != self.lang_setting
+        self.lang_setting = lang_setting
+        self.theme_setting = theme_setting
+        self._apply_theme()
+        if changed_lang and resolve_language(lang_setting) != self.lang:
+            # strings are baked into the widgets, so a language change needs a fresh window
+            self._append_log(self.t("lang_changed"))
 
     # ----------------------------------------------------------- window chrome
     def _panel(self, name: str) -> QFrame:
@@ -1030,7 +1541,7 @@ class MainWindow(QWidget):
         self._material = applied
         # pywinstyles' paint() replaces the widget stylesheet, so the real stylesheet has to
         # go on *after* the material call — otherwise the glass style gets wiped.
-        self.setStyleSheet(window_stylesheet(self._glass_on))
+        self.setStyleSheet(window_stylesheet(self._glass_on, self._style_sheet()))
         # Colour the native frame to match the app, and keep the window border off.
         tune_native_frame(hwnd, glass_on=self._glass_on)
         self.backdrop.set_enabled(self._glass_on)
@@ -1051,9 +1562,9 @@ class MainWindow(QWidget):
             return
         self._update_busy = True
         self.btn_update.setEnabled(False)
-        self.lbl_update.setText("检查中…")
+        self.lbl_update.setText(self.t("checking"))
         self.lbl_update.setOpenExternalLinks(False)
-        self._append_log("正在检查更新…（%s）" % RELEASES_URL)
+        self._append_log(self.t("log_checking") % RELEASES_URL)
 
         def work():
             try:
@@ -1073,20 +1584,20 @@ class MainWindow(QWidget):
             latest = info.get("latest", "")
             url = info.get("url") or RELEASES_URL
             self.lbl_update.setText(
-                '有新版本 <a href="%s" style="color:#9ad8ff;">%s</a>（当前 v%s）'
-                % (url, latest, VERSION))
+                '<a href="%s" style="color:#9ad8ff;">%s %s</a>'
+                % (url, self.t("update_available"), latest))
             self.lbl_update.setOpenExternalLinks(True)
-            self._append_log("发现新版本 %s：%s" % (latest, url))
+            self._append_log(self.t("update_found") % (latest, url))
         elif status == "current":
-            self.lbl_update.setText("已是最新版本")
-            self._append_log("已是最新版本（v%s）" % VERSION)
+            self.lbl_update.setText(self.t("update_latest"))
+            self._append_log(self.t("update_latest_log") % VERSION)
         else:
-            reason = info.get("error", "未知原因")
+            reason = info.get("error", self.t("unknown_reason"))
             self.lbl_update.setText(
-                '检查失败，<a href="%s" style="color:#9ad8ff;">手动查看 Releases</a>'
-                % RELEASES_URL)
+                '%s<a href="%s" style="color:#9ad8ff;">%s</a>'
+                % (self.t("update_failed"), RELEASES_URL, self.t("view_releases")))
             self.lbl_update.setOpenExternalLinks(True)
-            self._append_log("更新检查不可用：%s" % reason)
+            self._append_log(self.t("update_unavailable") % reason)
 
     def organize_settings(self):
         """Translate the controls into (lang_map, organize, mode) for the converter.
@@ -1116,11 +1627,11 @@ class MainWindow(QWidget):
     def preview_layout(self):
         """Show where each queued track would land, without converting anything."""
         if not self.files:
-            self._append_log("请先拖入或选择 .ncm 文件")
+            self._append_log(self.t("add_none"))
             return
         mapping, organize, state = self.organize_settings()
         if state == "invalid":
-            self._append_log("「其他」目录名不能为空")
+            self._append_log(self.t("other_empty_short"))
             return
         from ncmdump.ncm2mp3 import _organize_options, _target_dir
         from ncmdump.ncm_core import decrypt_file
@@ -1133,16 +1644,16 @@ class MainWindow(QWidget):
                 parsed = decrypt_file(path, read_audio=False)
                 target = _target_dir(path, out_dir, parsed, folders, organize, mode, artist)
             except Exception as exc:
-                target = "（读取失败：%s）" % exc
-            buckets.setdefault(target or "（源目录）", 0)
-            buckets[target or "（源目录）"] += 1
+                target = self.t("read_failed") % exc
+            buckets.setdefault(target or self.t("src_dir_label"), 0)
+            buckets[target or self.t("src_dir_label")] += 1
         base = os.path.abspath(out_dir) if out_dir else ""
-        self._append_log("落点预览（共 %d 首）：" % len(self.files))
+        self._append_log(self.t("preview_title") % len(self.files))
         for target, count in sorted(buckets.items()):
             shown = target
             if base and os.path.abspath(target).startswith(base):
                 shown = os.path.relpath(target, base)
-            self._append_log("    %-34s %d 首" % (shown, count))
+            self._append_log(self.t("preview_row") % (shown, count))
 
     def pick_output(self):
         current = self.ed_out.text().strip()
@@ -1150,23 +1661,22 @@ class MainWindow(QWidget):
             # no personal path baked in: start from the user's own Music folder
             current = QStandardPaths.writableLocation(QStandardPaths.MusicLocation) \
                 or os.path.expanduser("~")
-        chosen = QFileDialog.getExistingDirectory(self, "选择输出目录", current)
+        chosen = QFileDialog.getExistingDirectory(self, self.t("choose_out_dir"), current)
         if chosen:
             self.ed_out.setText(chosen)
-            self._append_log("输出目录：" + chosen)
+            self._append_log(self.t("out_dir_set") + chosen)
 
     def open_output(self):
         path = self.ed_out.text().strip()
         if not path:
             path = os.path.dirname(os.path.abspath(self.files[0])) if self.files else ""
         if not path or not os.path.isdir(path):
-            self._append_log("输出目录不存在：%s（未指定时输出在源文件所在目录）"
-                             % (path or "(空)"))
+            self._append_log(self.t("out_missing") % (path or self.t("empty_paren")))
             return
         try:
             os.startfile(path)  # noqa: S606  (Windows shell open)
         except Exception as exc:
-            self._append_log("打开失败：%s" % exc)
+            self._append_log(self.t("open_failed") % exc)
 
     def add_paths(self, paths):
         found = self._find_inputs(paths, recursive=True)
@@ -1174,13 +1684,15 @@ class MainWindow(QWidget):
         added = [p for p in found if os.path.abspath(p).lower() not in known]
         self.files.extend(added)
         total_bytes = sum(os.path.getsize(p) for p in self.files if os.path.isfile(p))
-        self.drop.title.setText("已选择 %d 个 .ncm（%s）" % (len(self.files), self._human(total_bytes)))
-        self.drop.hint.setText("可以继续拖入更多文件；点“开始转换”即可")
-        self.lbl_stat.setText("待转换 %d 个文件 · %s" % (len(self.files), self._human(total_bytes)))
+        self.drop.title.setText(
+            self.t("drop_selected") % (len(self.files), self._human(total_bytes)))
+        self.drop.hint.setText(self.t("drop_more"))
+        self.lbl_stat.setText(
+            self.t("pending") % (len(self.files), self._human(total_bytes)))
         if added:
-            self._append_log("已加入 %d 个文件" % len(added))
+            self._append_log(self.t("add_new") % len(added))
         else:
-            self._append_log("没有找到新的 .ncm 文件")
+            self._append_log(self.t("add_dup"))
 
     def _append_log(self, text: str, tag: str = ""):
         prefix = time.strftime("%H:%M:%S ")
@@ -1233,7 +1745,7 @@ class MainWindow(QWidget):
 
     def start(self):
         if not self.files:
-            self._append_log("请先拖入或选择 .ncm 文件")
+            self._append_log(self.t("add_none"))
             return
         out_dir = self.ed_out.text().strip()
         # an empty box means "next to each source file"; only create it when it is set,
@@ -1242,16 +1754,16 @@ class MainWindow(QWidget):
             try:
                 os.makedirs(out_dir, exist_ok=True)
             except OSError as exc:
-                self._append_log("输出目录不可用：%s" % exc)
+                self._append_log(self.t("out_unusable") % exc)
                 return
 
         stale = self._clean_stale_tempfiles(out_dir)
         if stale:
-            self._append_log("清理了 %d 个上次中断残留的临时文件" % stale)
+            self._append_log(self.t("cleaned") % stale)
 
         lang_map, organize, state = self.organize_settings()
         if state == "invalid":
-            self._append_log("「其他」目录名不能为空（其他语种会没有去处）")
+            self._append_log(self.t("other_empty"))
             return
 
         self.total = len(self.files)
@@ -1263,8 +1775,8 @@ class MainWindow(QWidget):
         self.btn_cancel.setEnabled(True)
         self.drop.setEnabled(False)
         self.log.setText("")
-        self._append_log("开始转换 %d 个文件（%s）→ %s" % (
-            self.total, self.cmb_organize.currentText(), out_dir or "源文件所在目录"))
+        self._append_log(self.t("started") % (
+            self.total, self.cmb_organize.currentText(), out_dir or self.t("src_dir")))
 
         keep = self.chk_keep.isChecked()
         want_lyrics = self.chk_lyrics.isChecked()
@@ -1309,7 +1821,7 @@ class MainWindow(QWidget):
 
     def cancel(self):
         self.cancel_flag.set()
-        self._append_log("正在停止…（已开始的当前文件会跑完）")
+        self._append_log(self.t("stopping"))
         self.btn_cancel.setEnabled(False)
 
     # -------------------------------------------------------------- updates
@@ -1328,15 +1840,16 @@ class MainWindow(QWidget):
             elif kind == "update":
                 self._on_update_result(payload)
             elif kind == "fatal":
-                self._append_log("致命错误：" + payload.get("error", ""))
+                self._append_log(self.t("fatal") + payload.get("error", ""))
             elif kind == "done":
                 self._drain_queue()
                 self._finish()
 
     def _handle_stage(self, payload):
-        names = {"metadata": "读取信息", "decrypt": "解密音频", "cover": "下载封面",
-                 "tag": "写入标签", "verify": "校验"}
-        self.lbl_stat.setText("正在处理：%s  ·  %s" % (
+        names = {"metadata": self.t("stage_metadata"), "decrypt": self.t("stage_decrypt"),
+                 "cover": self.t("stage_cover"), "tag": self.t("stage_tag"),
+                 "verify": self.t("stage_verify")}
+        self.lbl_stat.setText(self.t("processing") % (
             payload["name"][:44], names.get(payload["stage"], payload["stage"])))
 
     def _handle_result(self, r):
@@ -1348,11 +1861,11 @@ class MainWindow(QWidget):
                 r["name"][:38], os.path.basename(r["out"])[:38], self._human(r["bytes"])))
         else:
             self.failed += 1
-            self._append_log("✗ %s  失败：%s" % (r["name"][:38], r["error"]))
+            self._append_log(self.t("item_failed") % (r["name"][:38], r["error"]))
         self.bar.setValue(int(self.done / max(1, self.total) * 1000))
         elapsed = max(0.001, time.time() - self.started_at)
         speed = self.bytes_done / elapsed
-        self.lbl_stat.setText("完成 %d/%d · 成功 %d · 失败 %d" % (
+        self.lbl_stat.setText(self.t("progress") % (
             self.done, self.total, self.ok, self.failed))
         self.lbl_speed.setText("%s/s" % self._human(speed))
 
@@ -1361,12 +1874,12 @@ class MainWindow(QWidget):
         self.btn_cancel.setEnabled(False)
         self.drop.setEnabled(True)
         elapsed = time.time() - self.started_at
-        self._append_log("完成：成功 %d，失败 %d，用时 %.1fs" % (self.ok, self.failed, elapsed))
-        self.lbl_stat.setText("完成 %d/%d · 成功 %d · 失败 %d · 用时 %.1fs" % (
+        self._append_log(self.t("done_summary") % (self.ok, self.failed, elapsed))
+        self.lbl_stat.setText(self.t("done_stat") % (
             self.done, self.total, self.ok, self.failed, elapsed))
         self.files = []
-        self.drop.title.setText("把 .ncm 文件或文件夹拖到这里")
-        self.drop.hint.setText("也可以点下面的按钮选择；支持递归子目录")
+        self.drop.title.setText(self.t("drop_title"))
+        self.drop.hint.setText(self.t("drop_hint"))
         if self.ok and not self.failed:
             self.bar.setValue(1000)
 
@@ -1469,8 +1982,8 @@ def main(argv=None) -> int:
             pass
 
     app = QApplication(argv)
-    app.setApplicationName("NCM 本地转换器")
-    app.setStyleSheet(STYLE)
+    app.setApplicationName("NCM Converter")
+    # The window applies its own stylesheet: it owns the 日间/夜间/跟随系统 choice.
     app.setWindowIcon(make_icon())
     trace("QApplication ready")
     _boot_log("QApplication ready")
