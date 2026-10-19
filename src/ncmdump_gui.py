@@ -337,8 +337,8 @@ QWidget { color: #eef3ff; font-family: "Microsoft YaHei", "Microsoft YaHei UI", 
     border-radius: 16px;
 }
 QPushButton#menu {
-    background: transparent; border: none; border-radius: 8px;
-    padding: 4px 10px; font-size: 12px; font-weight: 700;
+    background: transparent; border: none; border-radius: 9px;
+    padding: 8px 18px; font-size: 13px; font-weight: 700;
 }
 QPushButton#menu:hover { background: rgba(255, 255, 255, 34); }
 #appheader { background: transparent; }
@@ -423,6 +423,15 @@ QScrollArea { background: transparent; }
 QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
 QScrollBar::handle:vertical { background: rgba(255, 255, 255, 80); border-radius: 4px; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+/* Dialogs follow the theme too: without these the message boxes keep the OS palette and
+   show dark-on-dark when the app runs light. */
+QDialog { background: #1b2130; }
+QDialog QLabel { color: #eef3ff; background: transparent; }
+QDialog QPushButton, QMessageBox QPushButton {
+    background: rgba(255, 255, 255, 28); border: 1px solid rgba(255, 255, 255, 38);
+    border-radius: 9px; padding: 6px 18px; min-width: 70px;
+}
+QDialog QPushButton:hover, QMessageBox QPushButton:hover { background: rgba(255, 255, 255, 60); }
 """
 
 # Same structure as STYLE, with the surfaces inverted. Kept as a separate sheet rather than
@@ -437,8 +446,8 @@ QWidget { color: #16202e; font-family: "Microsoft YaHei", "Microsoft YaHei UI", 
 #panelOpt { background: rgba(46, 200, 150, 30); border: 1px solid rgba(46, 190, 150, 86); border-radius: 16px; }
 #panelRun { background: rgba(158, 118, 255, 34); border: 1px solid rgba(158, 118, 255, 86); border-radius: 16px; }
 QPushButton#menu {
-    background: transparent; border: none; border-radius: 8px;
-    padding: 4px 10px; font-size: 12px; font-weight: 700;
+    background: transparent; border: none; border-radius: 9px;
+    padding: 8px 18px; font-size: 13px; font-weight: 700;
 }
 QPushButton#menu:hover { background: rgba(20, 40, 80, 26); }
 #appheader { background: transparent; }
@@ -514,6 +523,13 @@ QScrollArea { background: transparent; }
 QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
 QScrollBar::handle:vertical { background: rgba(30, 50, 80, 110); border-radius: 4px; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+QDialog { background: #ffffff; }
+QDialog QLabel { color: #16202e; background: transparent; }
+QDialog QPushButton, QMessageBox QPushButton {
+    background: rgba(255, 255, 255, 235); border: 1px solid rgba(20, 40, 80, 60);
+    border-radius: 9px; padding: 6px 18px; min-width: 70px; color: #16202e;
+}
+QDialog QPushButton:hover, QMessageBox QPushButton:hover { background: #ffffff; }
 """
 
 # Interface strings. One table per language, keyed by the same names, so a missing key is
@@ -1142,7 +1158,7 @@ class MainWindow(QWidget):
         for btn in (self.btn_general, self.btn_help, self.btn_about):
             btn.setObjectName("menu")
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedHeight(26)
+            btn.setFixedHeight(32)
             bar.addWidget(btn)
         self.btn_general.clicked.connect(self.open_settings)
         self.btn_help.clicked.connect(self.open_help)
@@ -1156,7 +1172,7 @@ class MainWindow(QWidget):
         self.btn_update = QPushButton(self.t("check_update"))
         self.btn_update.setObjectName("ghost")
         self.btn_update.setToolTip(self.t("update_tooltip"))
-        self.btn_update.setFixedHeight(26)
+        self.btn_update.setFixedHeight(32)
         self.btn_update.clicked.connect(self.check_updates)
         bar.addWidget(self.lbl_update)
         bar.addWidget(self.btn_update)
@@ -1407,9 +1423,9 @@ class MainWindow(QWidget):
         btn.setToolTip(tip)
         btn.setCursor(Qt.PointingHandCursor)
         btn.setFocusPolicy(Qt.NoFocus)
-        btn.setFixedSize(15, 15)
+        btn.setFixedSize(18, 18)
         btn.setStyleSheet(
-            "QPushButton { background: %s; border: none; border-radius: 7px;"
+            "QPushButton { background: %s; border: none; border-radius: 9px;"
             " color: transparent; font-size: 9px; font-weight: 700; padding: 0; }"
             "QPushButton:hover { color: rgba(18, 22, 30, 0.85); }" % color
         )
