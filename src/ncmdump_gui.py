@@ -291,79 +291,102 @@ def make_icon(size: int = 128) -> QIcon:
 
 
 STYLE = """
-QWidget { color: #eaf0ff; font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; font-size: 13px; }
+QWidget { color: #eef3ff; font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; font-size: 13px; }
 #root { background: transparent; }
-/* No borders inside the app: separation comes from fill contrast and rounded light
-   surfaces, so the design reads as one continuous sheet of glass. */
+/* ---- main glass card: one continuous sheet, edges only where groups need them ---- */
 #card {
-    background: rgba(14, 18, 30, 58);
-    border: none;
-    border-radius: 14px;
+    background: rgba(14, 19, 34, 26);
+    border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 22px;
 }
 #card[solid="true"] {
-    background: rgba(22, 26, 38, 246);
+    background: rgba(20, 24, 38, 246);
 }
-/* Native title bar is drawn by Windows; this strip is just an in-app header. */
+/* ---- tinted glass panels: one colour per functional group, all very translucent ---- */
+#panel {
+    background: rgba(255, 255, 255, 8);
+    border: 1px solid rgba(255, 255, 255, 22);
+    border-radius: 16px;
+}
+#panelOut {
+    background: rgba(86, 160, 255, 24);
+    border: 1px solid rgba(140, 190, 255, 44);
+    border-radius: 16px;
+}
+#panelOpt {
+    background: rgba(46, 226, 168, 20);
+    border: 1px solid rgba(120, 240, 200, 40);
+    border-radius: 16px;
+}
+#panelRun {
+    background: rgba(158, 118, 255, 24);
+    border: 1px solid rgba(190, 160, 255, 44);
+    border-radius: 16px;
+}
 #appheader { background: transparent; }
-#title { font-size: 15px; font-weight: 600; letter-spacing: 0.4px; }
-#subtitle { color: rgba(232, 240, 255, 225); font-size: 11px; }
+#title { font-size: 16px; font-weight: 700; letter-spacing: 0.4px; }
+#subtitle { color: rgba(232, 240, 255, 205); font-size: 11px; }
 #langTag { color: rgba(190, 222, 255, 215); font-size: 10px; letter-spacing: 0.5px; }
 #footerText { color: rgba(206, 220, 248, 190); font-size: 11px; }
 QComboBox {
-    background: rgba(255, 255, 255, 44); border: none; border-radius: 9px;
-    padding: 7px 11px; color: #eef3ff;
+    background: rgba(255, 255, 255, 28); border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 11px; padding: 7px 12px; color: #eef3ff;
 }
-QComboBox:hover { background: rgba(255, 255, 255, 62); }
+QComboBox:hover { background: rgba(255, 255, 255, 48); }
 QComboBox::drop-down { border: none; width: 22px; }
 QComboBox QAbstractItemView {
     background: #1b2130; border: none; selection-background-color: rgba(120, 180, 255, 120);
     color: #eef3ff; outline: none;
 }
+/* ---- drop zone: the one strongly tinted surface, so the target is unmistakable ---- */
 #drop {
-    background: rgba(255, 255, 255, 40);
-    border: none;
-    border-radius: 14px;
+    background: rgba(255, 110, 160, 30);
+    border: 1px solid rgba(255, 170, 205, 55);
+    border-radius: 18px;
 }
-#drop[hot="true"] { background: rgba(130, 190, 255, 104); }
+#drop[hot="true"] { background: rgba(255, 150, 190, 68); }
 #dropTitle { font-size: 15px; font-weight: 600; color: #f5f9ff; }
 #dropHint { color: rgba(228, 238, 255, 200); font-size: 12px; }
 #sectionTitle { color: rgba(212, 224, 252, 225); font-size: 11px; font-weight: 600; letter-spacing: 1px; }
 QPushButton#ghost {
-    background: rgba(255, 255, 255, 46); border: none;
-    border-radius: 9px; padding: 8px 15px;
+    background: rgba(255, 255, 255, 28); border: 1px solid rgba(255, 255, 255, 38);
+    border-radius: 11px; padding: 8px 16px;
 }
-QPushButton#ghost:hover { background: rgba(255, 255, 255, 78); }
+QPushButton#ghost:hover { background: rgba(255, 255, 255, 60); }
+QPushButton#ghost:disabled { color: rgba(235, 240, 255, 120); background: rgba(255, 255, 255, 16); }
 QPushButton#primary {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                 stop:0 rgba(86, 182, 255, 240), stop:1 rgba(158, 118, 255, 240));
-    border: none; border-radius: 12px; padding: 12px 26px;
-    font-size: 14px; font-weight: 700; color: #0b1020;
+    border: 1px solid rgba(255, 255, 255, 55); border-radius: 14px;
+    padding: 12px 26px; font-size: 14px; font-weight: 700; color: #0b1020;
 }
 QPushButton#primary:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                 stop:0 rgba(120, 200, 255, 252), stop:1 rgba(180, 145, 255, 252)); }
-QPushButton#primary:disabled { background: rgba(255, 255, 255, 40); color: rgba(235, 240, 255, 150); }
+QPushButton#primary:disabled { background: rgba(255, 255, 255, 30); color: rgba(235, 240, 255, 140); }
 QPushButton#danger {
-    background: rgba(255, 92, 104, 205); border: none; border-radius: 12px;
-    padding: 12px 20px; font-weight: 700; color: white;
+    background: rgba(255, 92, 104, 200); border: 1px solid rgba(255, 150, 160, 55);
+    border-radius: 14px; padding: 12px 20px; font-weight: 700; color: white;
 }
-QPushButton#danger:hover { background: rgba(255, 116, 126, 235); }
-QPushButton#danger:disabled { background: rgba(255, 255, 255, 30); color: rgba(235, 240, 255, 120); }
+QPushButton#danger:hover { background: rgba(255, 116, 126, 232); }
+QPushButton#danger:disabled { background: rgba(255, 255, 255, 26); color: rgba(235, 240, 255, 110); }
 QLineEdit {
-    background: rgba(255, 255, 255, 44); border: none;
-    border-radius: 9px; padding: 8px 11px; selection-background-color: rgba(120, 180, 255, 150);
+    background: rgba(255, 255, 255, 26); border: 1px solid rgba(255, 255, 255, 30);
+    border-radius: 11px; padding: 8px 12px; selection-background-color: rgba(120, 180, 255, 150);
 }
-QLineEdit:focus { background: rgba(255, 255, 255, 64); }
-QLineEdit:disabled { color: rgba(220, 228, 250, 120); background: rgba(255, 255, 255, 22); }
+QLineEdit:focus { background: rgba(255, 255, 255, 44); border: 1px solid rgba(160, 210, 255, 90); }
+QLineEdit:disabled { color: rgba(220, 228, 250, 120); background: rgba(255, 255, 255, 18); }
 QCheckBox { spacing: 8px; color: rgba(236, 242, 255, 245); }
 QCheckBox::indicator { width: 17px; height: 17px; border-radius: 5px;
-                       border: none; background: rgba(255, 255, 255, 58); }
+                       border: 1px solid rgba(255, 255, 255, 40); background: rgba(255, 255, 255, 40); }
 QCheckBox::indicator:checked {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                 stop:0 rgba(96, 190, 255, 250), stop:1 rgba(160, 120, 255, 250));
+    border: 1px solid rgba(255, 255, 255, 60);
 }
 QProgressBar {
-    background: rgba(255, 255, 255, 32); border: none; border-radius: 7px;
-    height: 14px; text-align: center; color: rgba(245, 248, 255, 245); font-size: 10px;
+    background: rgba(255, 255, 255, 26); border: 1px solid rgba(255, 255, 255, 26);
+    border-radius: 7px; height: 14px; text-align: center;
+    color: rgba(245, 248, 255, 245); font-size: 10px;
 }
 QProgressBar::chunk {
     border-radius: 7px;
@@ -371,8 +394,8 @@ QProgressBar::chunk {
                 stop:0 rgba(86, 182, 255, 245), stop:1 rgba(158, 118, 255, 245));
 }
 #log {
-    background: rgba(255, 255, 255, 26); border: none;
-    border-radius: 10px; padding: 9px; color: rgba(232, 240, 255, 245);
+    background: transparent; border: none; padding: 9px;
+    color: rgba(232, 240, 255, 245);
     font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px;
 }
 #stat { color: rgba(232, 240, 255, 240); font-size: 12px; }
@@ -555,8 +578,8 @@ class MainWindow(QWidget):
         self.setObjectName("root")
         self.setWindowTitle("NCM 本地转换器")
         self.setWindowIcon(make_icon())
-        self.resize(940, 700)
-        self.setMinimumSize(760, 560)
+        self.resize(980, 820)
+        self.setMinimumSize(820, 680)
         self._resize_edges = Qt.Edges()
 
         # Workers never touch widgets: they post plain dicts here and the main thread's
@@ -659,7 +682,13 @@ class MainWindow(QWidget):
         self.drop.filesDropped.connect(self.add_paths)
         outer.addWidget(self.drop)
 
-        # ---- output row
+        # ---- functional group 1: where the files go (tinted glass)
+        panel_out = self._panel("panelOut")
+        p_out = QVBoxLayout(panel_out)
+        p_out.setContentsMargins(14, 12, 14, 14)
+        p_out.setSpacing(10)
+
+        # output row
         row = QHBoxLayout()
         row.setSpacing(8)
         lbl = QLabel("输出目录")
@@ -672,7 +701,7 @@ class MainWindow(QWidget):
         row.addWidget(lbl)
         row.addWidget(self.ed_out, 1)
         row.addWidget(self.btn_out)
-        outer.addLayout(row)
+        p_out.addLayout(row)
 
         # ---- organize: mode + per-language folder names (all editable)
         mode_row = QHBoxLayout()
@@ -695,7 +724,7 @@ class MainWindow(QWidget):
         mode_row.addWidget(mode_label)
         mode_row.addWidget(self.cmb_organize, 1)
         mode_row.addWidget(self.btn_plan)
-        outer.addLayout(mode_row)
+        p_out.addLayout(mode_row)
 
         # one editable field per language; the label shows the detected code
         self.lang_fields = {}
@@ -719,9 +748,14 @@ class MainWindow(QWidget):
             box.addWidget(edit)
             self.lang_fields[code] = edit
             lang_row.addLayout(box, 1)
-        outer.addLayout(lang_row)
+        p_out.addLayout(lang_row)
+        outer.addWidget(panel_out)
 
-        # ---- options
+        # ---- functional group 2: conversion options (tinted glass)
+        panel_opt = self._panel("panelOpt")
+        p_opt = QVBoxLayout(panel_opt)
+        p_opt.setContentsMargins(14, 10, 14, 12)
+        p_opt.setSpacing(8)
         opts = QHBoxLayout()
         opts.setSpacing(16)
         self.chk_keep = QCheckBox("保留 .ncm")
@@ -733,9 +767,14 @@ class MainWindow(QWidget):
         for widget in (self.chk_keep, self.chk_lyrics, self.chk_verify, self.chk_cover):
             opts.addWidget(widget)
         opts.addStretch(1)
-        outer.addLayout(opts)
+        p_opt.addLayout(opts)
+        outer.addWidget(panel_opt)
 
-        # ---- action row
+        # ---- functional group 3: run controls (tinted glass)
+        panel_run = self._panel("panelRun")
+        p_run = QVBoxLayout(panel_run)
+        p_run.setContentsMargins(14, 12, 14, 14)
+        p_run.setSpacing(10)
         action = QHBoxLayout()
         action.setSpacing(10)
         self.btn_go = QPushButton("开始转换")
@@ -751,14 +790,14 @@ class MainWindow(QWidget):
         action.addWidget(self.btn_go, 2)
         action.addWidget(self.btn_cancel, 1)
         action.addWidget(self.btn_open, 1)
-        outer.addLayout(action)
+        p_run.addLayout(action)
 
         # ---- progress
         self.bar = QProgressBar()
         self.bar.setRange(0, 1000)
         self.bar.setValue(0)
         self.bar.setFormat("%p%")
-        outer.addWidget(self.bar)
+        p_run.addWidget(self.bar)
         stats = QHBoxLayout()
         self.lbl_stat = QLabel("等待任务")
         self.lbl_stat.setObjectName("stat")
@@ -766,7 +805,8 @@ class MainWindow(QWidget):
         self.lbl_speed.setObjectName("statAccent")
         stats.addWidget(self.lbl_stat, 1)
         stats.addWidget(self.lbl_speed)
-        outer.addLayout(stats)
+        p_run.addLayout(stats)
+        outer.addWidget(panel_run)
 
         # ---- log
         self.log = QLabel("")
@@ -787,7 +827,11 @@ class MainWindow(QWidget):
         holder_layout.addStretch(1)
         scroll.setWidget(holder)
         self.log_scroll = scroll
-        outer.addWidget(scroll, 1)
+        panel_log = self._panel("panel")
+        p_log = QVBoxLayout(panel_log)
+        p_log.setContentsMargins(6, 6, 6, 6)
+        p_log.addWidget(scroll)
+        outer.addWidget(panel_log, 1)
 
         # ---- footer: version + developer (left), update check (right)
         footer = QHBoxLayout()
@@ -811,6 +855,13 @@ class MainWindow(QWidget):
         self._on_organize_changed(self.cmb_organize.currentIndex())
 
     # ----------------------------------------------------------- window chrome
+    def _panel(self, name: str) -> QFrame:
+        """A tinted glass panel that groups one functional block."""
+        panel = QFrame()
+        panel.setObjectName(name)
+        panel.setAttribute(Qt.WA_StyledBackground, True)
+        return panel
+
     def _window_dot(self, color: str, glyph: str, tip: str) -> QPushButton:
         """One coloured window dot; the glyph only shows on hover (macOS style)."""
         btn = QPushButton(glyph)
