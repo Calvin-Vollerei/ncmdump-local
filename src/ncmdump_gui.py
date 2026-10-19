@@ -258,7 +258,6 @@ from PySide6.QtWidgets import (  # noqa: E402
     QComboBox,
     QFileDialog,
     QFrame,
-    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -511,7 +510,7 @@ class GlassBackdrop(QWidget):
     is the OS material seen through the window.
     """
 
-    RADIUS = 16
+    RADIUS = 22
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -579,7 +578,10 @@ class MainWindow(QWidget):
         self.setWindowTitle("NCM 本地转换器")
         self.setWindowIcon(make_icon())
         self.resize(980, 820)
-        self.setMinimumSize(820, 680)
+        # The content genuinely needs this much: header + drop zone + three stacked panels
+        # + log. Shrinking below it used to squeeze every row to its minimum and clip text,
+        # so the floor is raised to the real requirement instead.
+        self.setMinimumSize(900, 760)
         self._resize_edges = Qt.Edges()
 
         # Workers never touch widgets: they post plain dicts here and the main thread's
@@ -621,17 +623,15 @@ class MainWindow(QWidget):
         root.addWidget(self.backdrop)
 
         overlay = QVBoxLayout(self.backdrop)
-        overlay.setContentsMargins(14, 14, 14, 14)
+        # No outer gutter: the user wants the app to look like a native window, and a
+        # transparent ring around the card reads as "an extra layer" that should not be
+        # there. The card now runs edge to edge.
+        overlay.setContentsMargins(0, 0, 0, 0)
         overlay.setSpacing(0)
 
         card = QFrame()
         card.setObjectName("card")
         self.card = card
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(26)
-        shadow.setColor(QColor(0, 0, 0, 90))
-        shadow.setOffset(0, 4)
-        card.setGraphicsEffect(shadow)
         overlay.addWidget(card)
 
         outer = QVBoxLayout(card)
@@ -852,6 +852,15 @@ class MainWindow(QWidget):
         footer.addWidget(self.btn_update)
         outer.addLayout(footer)
 
+        # Widgets must not collapse below a usable height when the window is resized: QSS
+        # padding alone does not raise the layout's minimum, it only pads the drawn box.
+        # The two big buttons need more room than the inputs (12 px padding + 14 px text).
+        for widget in (self.ed_out, self.cmb_organize, self.btn_out, self.btn_plan,
+                       self.btn_open, self.btn_update, *self.lang_fields.values()):
+            widget.setMinimumHeight(34)
+        for widget in (self.btn_go, self.btn_cancel):
+            widget.setMinimumHeight(42)
+
         self._on_organize_changed(self.cmb_organize.currentIndex())
 
     # ----------------------------------------------------------- window chrome
@@ -883,11 +892,21 @@ class MainWindow(QWidget):
         else:
             self.showMaximized()
 
-    def nativeEvent(self, eventType, message):
-        """Give the frameless window its edge-resize hit areas back.
+    #: Height of the in-app title strip; drag / Snap / maximise are delegated to the shell.
+    TITLEBAR_HEIGHT = 44
+    #: Right-hand zone holding the window dots, which must stay clickable (HTCLIENT).
+    WINDOW_DOTS_WIDTH = 92
 
-        WM_NCHITTEST is the only reliable place for this: ``startSystemResize`` needs a
-        widget-level mouse press, and every window edge here is covered by child widgets.
+    def nativeEvent(self, eventType, message):
+        """Hand hit-testing back to the shell — this is what makes a frameless window
+        behave like a native one.
+
+        Three things happen here:
+          * edge / corner resize zones (a frameless window has no borders of its own),
+          * HTCAPTION over the title strip, so Windows itself provides Aero Snap,
+            drag-to-edge tiling, double-click-to-maximise and drag-to-top — the behaviour
+            ``startSystemMove()`` alone does not give us, and
+          * HTCLIENT over the coloured dots, so they stay clickable.
         """
         if sys.platform == "win32" and eventType == b"windows_generic_MSG":
             try:
@@ -901,11 +920,15 @@ class MainWindow(QWidget):
                     rect = wintypes.RECT()
                     ctypes.windll.user32.GetWindowRect(
                         wintypes.HWND(int(self.winId())), ctypes.byref(rect))
+                    cx = sx - rect.left
+                    cy = sy - rect.top
+                    w = rect.right - rect.left
+                    h = rect.bottom - rect.top
                     border = 6
-                    left = sx <= rect.left + border
-                    right = sx >= rect.right - border
-                    top = sy <= rect.top + border
-                    bottom = sy >= rect.bottom - border
+                    left = cx <= border
+                    right = cx >= w - border
+                    top = cy <= border
+                    bottom = cy >= h - border
                     if left and top:
                         return True, 13                        # HTTOPLEFT
                     if right and top:
@@ -922,6 +945,8 @@ class MainWindow(QWidget):
                         return True, 12                        # HTTOP
                     if bottom:
                         return True, 15                        # HTBOTTOM
+                    if cy < self.TITLEBAR_HEIGHT and cx < w - self.WINDOW_DOTS_WIDTH:
+                        return True, 2                         # HTCAPTION
             except Exception:
                 pass
         return super().nativeEvent(eventType, message)
