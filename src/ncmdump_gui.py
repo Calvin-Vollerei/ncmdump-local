@@ -54,20 +54,22 @@ GLASS_TINT_ALPHA = 46
 def apply_window_style(window, mode: str) -> str:
     """Apply a pywinstyles style to a Qt window. Returns the mode actually used.
 
-    pywinstyles' own ``paint()`` helper sets the *whole* widget stylesheet to
-    ``background-color: transparent`` before enabling acrylic — which would also wipe the
-    app's styling. We instead give the window object a transparent background ourselves, so
-    Qt leaves the client area unpainted and the DWM material shows through.
+    Pass the **widget**, never its ``int(winId())``: pywinstyles' ``paint()`` helper
+    dispatches on the window type, and an integer hits none of its branches — it then
+    prints ``Don't know what the window type is, please paint it black`` and never makes
+    the client area transparent (see docs/GLASS-TROUBLESHOOTING.md, pit 5).
+
+    ``paint()`` also replaces the widget stylesheet, so the caller must re-apply the real
+    stylesheet *after* this returns.
     """
     if _pws is None or os.name != "nt":
         return "none"
-    hwnd = int(window.winId())
     if mode == "solid":
-        _pws.apply_style(hwnd, "normal")
+        _pws.apply_style(window, "normal")
         return "solid"
     try:
         style = mode if mode in ("acrylic", "mica", "aero") else "acrylic"
-        _pws.apply_style(hwnd, style)
+        _pws.apply_style(window, style)
         return style
     except Exception as exc:
         _boot_log("pywinstyles failed (%s): %s" % (mode, exc))
@@ -442,18 +444,38 @@ class DropZone(QFrame):
 
 
 class AppHeader(QFrame):
-    """Slim in-app header.
+    """Draggable title strip carrying the app name and the coloured window dots.
 
-    There is deliberately no custom title bar any more: the window keeps the **native**
-    Windows frame, so dragging, resizing, Aero Snap, double-click-to-maximise, the system
-    menu and Alt+Space all come from the OS instead of being re-implemented (badly) here.
-    This strip only carries the app name, the material badge and the material toggle.
+    The window is frameless now, so this strip owns window dragging and
+    double-click-to-maximise: the three dots on the right are the only window buttons
+    (green = minimise, yellow = maximise / restore, red = close).
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("appheader")
-        self.setFixedHeight(40)
+        self.setFixedHeight(44)
+
+    # The OS title bar is gone, so window dragging and double-click maximise live here.
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            handle = self.window().windowHandle()
+            if handle is not None:
+                handle.startSystemMove()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            win = self.window()
+            if win.isMaximized():
+                win.showNormal()
+            else:
+                win.showMaximized()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 class GlassBackdrop(QWidget):
@@ -522,15 +544,20 @@ class MainWindow(QWidget):
         self._find_inputs = find_inputs
         self._languages = LANGUAGES
 
-        # Native window frame on purpose: keep the OS title bar, resizable borders and all
-        # the shell behaviour that comes with them (snap, maximise, system menu).
-        self.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint
-                            | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
+        # Frameless glass window. The OS title bar is replaced by our own 40 px strip so
+        # the coloured window dots can sit exactly where the system buttons used to be.
+        # Trade-off (documented in docs/GLASS-TROUBLESHOOTING.md): a frameless window loses
+        # the shell's Aero Snap and edge-resize hit areas, so drag / double-click maximise /
+        # edge resize are re-implemented below on top of QWindow.startSystemMove and
+        # startSystemResize.
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setObjectName("root")
         self.setWindowTitle("NCM 本地转换器")
         self.setWindowIcon(make_icon())
         self.resize(940, 700)
         self.setMinimumSize(760, 560)
+        self._resize_edges = Qt.Edges()
 
         # Workers never touch widgets: they post plain dicts here and the main thread's
         # timer drains it. (An earlier signal-based bridge was wired up but never emitted,
@@ -588,7 +615,7 @@ class MainWindow(QWidget):
         outer.setContentsMargins(18, 14, 18, 16)
         outer.setSpacing(12)
 
-        # ---- in-app header (the OS title bar sits above this; no window buttons here)
+        # ---- title strip: app name on the left, coloured window dots on the right
         self.header = AppHeader(card)
         bar = QHBoxLayout(self.header)
         bar.setContentsMargins(2, 0, 2, 0)
@@ -601,11 +628,30 @@ class MainWindow(QWidget):
         self.lbl_title.setObjectName("title")
         self.lbl_sub = QLabel("离线解密 · 保留标签与歌词 · 纯本地")
         self.lbl_sub.setObjectName("subtitle")
+        # Let the whole strip drag: a label that swallows the press would otherwise punch a
+        # dead hole in the title bar.
+        for label in (dot, self.lbl_title, self.lbl_sub):
+            label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         title_box.addWidget(self.lbl_title)
         title_box.addWidget(self.lbl_sub)
         bar.addWidget(dot)
         bar.addLayout(title_box)
         bar.addStretch(1)
+
+        # ---- coloured window dots: they replace the OS title-bar buttons.
+        # Order matches the request: minimise, maximise/restore ("贴合"), close.
+        self.btn_min = self._window_dot("#7bed9f", "−", "最小化")
+        self.btn_max = self._window_dot("#ffd166", "＋", "最大化 / 还原（贴合）")
+        self.btn_close = self._window_dot("#ff6b81", "×", "关闭")
+        self.btn_min.clicked.connect(self.showMinimized)
+        self.btn_max.clicked.connect(self._toggle_maximized)
+        self.btn_close.clicked.connect(self.close)
+        dots = QHBoxLayout()
+        dots.setSpacing(8)
+        dots.addWidget(self.btn_min)
+        dots.addWidget(self.btn_max)
+        dots.addWidget(self.btn_close)
+        bar.addLayout(dots)
         outer.addWidget(self.header)
 
         # ---- drop zone
@@ -765,6 +811,70 @@ class MainWindow(QWidget):
         self._on_organize_changed(self.cmb_organize.currentIndex())
 
     # ----------------------------------------------------------- window chrome
+    def _window_dot(self, color: str, glyph: str, tip: str) -> QPushButton:
+        """One coloured window dot; the glyph only shows on hover (macOS style)."""
+        btn = QPushButton(glyph)
+        btn.setObjectName("windot")
+        btn.setToolTip(tip)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFocusPolicy(Qt.NoFocus)
+        btn.setFixedSize(15, 15)
+        btn.setStyleSheet(
+            "QPushButton { background: %s; border: none; border-radius: 7px;"
+            " color: transparent; font-size: 9px; font-weight: 700; padding: 0; }"
+            "QPushButton:hover { color: rgba(18, 22, 30, 0.85); }" % color
+        )
+        return btn
+
+    def _toggle_maximized(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
+    def nativeEvent(self, eventType, message):
+        """Give the frameless window its edge-resize hit areas back.
+
+        WM_NCHITTEST is the only reliable place for this: ``startSystemResize`` needs a
+        widget-level mouse press, and every window edge here is covered by child widgets.
+        """
+        if sys.platform == "win32" and eventType == b"windows_generic_MSG":
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == 0x0084:                      # WM_NCHITTEST
+                    sx = ctypes.c_short(msg.lParam & 0xFFFF).value
+                    sy = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                    rect = wintypes.RECT()
+                    ctypes.windll.user32.GetWindowRect(
+                        wintypes.HWND(int(self.winId())), ctypes.byref(rect))
+                    border = 6
+                    left = sx <= rect.left + border
+                    right = sx >= rect.right - border
+                    top = sy <= rect.top + border
+                    bottom = sy >= rect.bottom - border
+                    if left and top:
+                        return True, 13                        # HTTOPLEFT
+                    if right and top:
+                        return True, 14                        # HTTOPRIGHT
+                    if left and bottom:
+                        return True, 16                        # HTBOTTOMLEFT
+                    if right and bottom:
+                        return True, 17                        # HTBOTTOMRIGHT
+                    if left:
+                        return True, 10                        # HTLEFT
+                    if right:
+                        return True, 11                        # HTRIGHT
+                    if top:
+                        return True, 12                        # HTTOP
+                    if bottom:
+                        return True, 15                        # HTBOTTOM
+            except Exception:
+                pass
+        return super().nativeEvent(eventType, message)
+
     def showEvent(self, event):
         super().showEvent(event)
         if not getattr(self, "_style_done", False):
@@ -783,7 +893,6 @@ class MainWindow(QWidget):
 
         # Native window material through pywinstyles (acrylic by default), falling back to
         # the raw DWM backdrop API if the package is missing.
-        self.setStyleSheet(window_stylesheet(self._glass_on))
         applied = self._material
         if not self._glass_on:
             pywinstyles_normal(hwnd)
@@ -792,6 +901,9 @@ class MainWindow(QWidget):
             if applied == "none":
                 applied = apply_glass(hwnd, True)
         self._material = applied
+        # pywinstyles' paint() replaces the widget stylesheet, so the real stylesheet has to
+        # go on *after* the material call — otherwise the glass style gets wiped.
+        self.setStyleSheet(window_stylesheet(self._glass_on))
         # Colour the native frame to match the app, and keep the window border off.
         tune_native_frame(hwnd, glass_on=self._glass_on)
         self.backdrop.set_enabled(self._glass_on)
