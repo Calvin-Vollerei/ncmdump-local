@@ -299,7 +299,7 @@ def make_icon(size: int = 128) -> QIcon:
 
 
 STYLE = """
-QWidget { color: #eef3ff; font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; font-size: 13px; }
+QWidget { color: #eef3ff; font-family: "Microsoft YaHei", "Microsoft YaHei UI", "Segoe UI", sans-serif; font-size: 13px; font-weight: 700; }
 #root { background: transparent; }
 /* ---- main glass card: one continuous sheet, edges only where groups need them ---- */
 #card {
@@ -404,7 +404,8 @@ QProgressBar::chunk {
 #log {
     background: transparent; border: none; padding: 9px;
     color: rgba(232, 240, 255, 245);
-    font-family: Consolas, "Cascadia Mono", monospace; font-size: 11px;
+    font-family: "Microsoft YaHei", "Microsoft YaHei UI", sans-serif;
+    font-size: 11px; font-weight: 700;
 }
 #stat { color: rgba(232, 240, 255, 240); font-size: 12px; }
 #statAccent { color: #a8dcff; font-weight: 600; }
@@ -658,7 +659,7 @@ class MainWindow(QWidget):
         title_box.setSpacing(0)
         self.lbl_title = QLabel("NCM 本地转换器")
         self.lbl_title.setObjectName("title")
-        self.lbl_sub = QLabel("离线解密 · 保留标签与歌词 · 纯本地")
+        self.lbl_sub = QLabel("NCM Converter")
         self.lbl_sub.setObjectName("subtitle")
         # Let the whole strip drag: a label that swallows the press would otherwise punch a
         # dead hole in the title bar.
