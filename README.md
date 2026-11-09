@@ -284,6 +284,15 @@ src/ncm_gui.spec        PyInstaller 配置
 tests/                  单元测试（含合成 .ncm 构造器）
 ```
 
+## 贡献者 / Contributors
+
+| 贡献者 | 角色 |
+| --- | --- |
+| **Calvin-Vollerei**（[@Calvin-Vollerei](https://github.com/Calvin-Vollerei)） | 作者、维护者 |
+| **Gvndam**（[@Gvndam](https://github.com/Gvndam)） | 报告了音频起点偏移导致输出 `.bin` 无法播放的容器解析缺陷（v1.0.2 修复） |
+
+完整名单与致谢见 [CONTRIBUTORS.md](CONTRIBUTORS.md)。
+
 ## 许可证与合规
 
 [MIT](LICENSE)。算法来源、两个十六进制常量的性质、授权范围与风险提示详见 [NOTICE.md](NOTICE.md)。
