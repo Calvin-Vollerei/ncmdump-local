@@ -18,6 +18,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python: ["3.9", "3.10", "3.11", "3.12"]
+        exclude:
+          # ubuntu-latest resolves to 26.04 now, and actions/python-versions publishes no 3.9
+          # build for it ("Version 3.9 with arch x64 not found in Ubuntu 26.04"). This is a
+          # runner/image gap, not a code change, so just that one cell is skipped - 3.9 stays
+          # covered on windows-latest.
+          - os: ubuntu-latest
+            python: "3.9"
     steps:
       - uses: actions/checkout@v4
 
